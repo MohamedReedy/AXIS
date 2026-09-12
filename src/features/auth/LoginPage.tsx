@@ -133,11 +133,6 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Bottom meta */}
-        <div className="relative z-10 flex items-center justify-between text-xs text-slate-300 border-t border-white/10 pt-6">
-          <span>Sprint 2 • Mastery Core</span>
-          <span className="font-mono text-[11px] text-cyan-200">v2.4 Production</span>
-        </div>
       </div>
 
       {/* Right Column: Sign In Form with App Background */}
