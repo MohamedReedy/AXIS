@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Maximize2, ShieldAlert, Siren } from 'lucide-react';
+import { isFullscreenSupported } from '@/features/lockdown/useLockdown';
 
 interface LockdownOverlayProps {
   isVisible: boolean;
@@ -21,6 +22,7 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
   if (!isVisible && !graceSeconds) return null;
 
   const isCritical = warningCount >= maxStrikes;
+  const isFsSupported = isFullscreenSupported();
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 sm:p-6 text-center animate-shake select-none">
@@ -70,7 +72,9 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
 
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-md mx-auto">
             {message ||
-              'You exited full-screen, clicked cancel, or switched to another window! Return immediately to avoid an official violation strike.'}
+              (isFsSupported
+                ? 'You exited full-screen, clicked cancel, or switched to another window! Return immediately to avoid an official violation strike.'
+                : 'You switched away from the exam window or tab! Return immediately to avoid an official violation strike.')}
           </p>
         </div>
 
@@ -82,7 +86,7 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
               <span>Warning: Action Will Be Taken In</span>
             </div>
             <div>
-              Return to fullscreen in{' '}
+              {isFsSupported ? 'Return to fullscreen in' : 'Return to examination in'}{' '}
               <strong className="text-red-700 text-base font-mono font-black px-2 py-0.5 bg-red-100 rounded">
                 {graceSeconds}s
               </strong>{' '}
@@ -98,7 +102,7 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
             className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-axis-blue to-blue-700 hover:from-blue-700 hover:to-blue-800 active:scale-[0.98] text-white font-bold py-3.5 px-6 rounded-2xl transition-all shadow-md shadow-blue-600/30 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer text-sm"
           >
             <Maximize2 className="w-4 h-4" />
-            <span>Return to Fullscreen & Resume Exam</span>
+            <span>{isFsSupported ? 'Return to Fullscreen & Resume Exam' : 'Resume Examination'}</span>
           </button>
         ) : (
           <div className="p-3.5 bg-red-50 rounded-xl text-xs text-red-700 border border-red-200 font-medium">

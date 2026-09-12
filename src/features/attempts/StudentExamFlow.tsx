@@ -17,7 +17,7 @@ import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
 import { Exam, Question, QuestionChoice, AttemptStatus, ViolationType } from '@/types';
 import { StudentLayout } from '@/layouts/StudentLayout';
-import { useLockdown } from '@/features/lockdown/useLockdown';
+import { useLockdown, isFullscreenSupported } from '@/features/lockdown/useLockdown';
 import { LockdownOverlay } from '@/components/lockdown/LockdownOverlay';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -724,7 +724,7 @@ export const StudentExamFlow: React.FC = () => {
             </div>
             <ul className="space-y-2.5 list-disc list-inside text-slate-600">
               <li>
-                <strong className="text-slate-900">Mandatory Full-Screen:</strong> The exam will lock your screen into full-screen. Exiting triggers an immediate warning siren and countdown.
+                <strong className="text-slate-900">{isFullscreenSupported() ? 'Mandatory Full-Screen:' : 'Dedicated Exam Focus:'}</strong> {isFullscreenSupported() ? 'The exam will lock your screen into full-screen. Exiting triggers an immediate warning siren and countdown.' : 'Maintain active focus on the examination tab. Leaving the tab, switching apps, or locking your device triggers an immediate strike countdown.'}
               </li>
               <li>
                 <strong className="text-slate-900">No Tab or Window Switching:</strong> Leaving or blurring the window will register an official anti-cheat strike.
@@ -744,7 +744,7 @@ export const StudentExamFlow: React.FC = () => {
             className="w-full flex items-center justify-center space-x-2 bg-[#0052D4] hover:bg-[#0041A8] active:bg-[#00358A] text-white font-bold py-3 shadow-xs hover:shadow-md hover:brightness-105 transition-all cursor-pointer border border-[#0052D4]"
           >
             <Maximize2 className="w-4 h-4" />
-            <span>Enter Fullscreen & Begin Exam</span>
+            <span>{isFullscreenSupported() ? 'Enter Fullscreen & Begin Exam' : 'Begin Locked Examination'}</span>
           </Button>
         </div>
       </StudentLayout>
@@ -762,7 +762,7 @@ export const StudentExamFlow: React.FC = () => {
       <div className="fixed inset-0 z-40 bg-slate-50 text-slate-900 flex flex-col lockdown-active">
         {/* Anti-Cheat Overlay (pops up on violation) */}
         <LockdownOverlay
-          isVisible={!isFullscreen || !!warningMessage}
+          isVisible={(!isFullscreen && isFullscreenSupported()) || !!warningMessage}
           warningCount={warningCount}
           maxStrikes={exam?.max_strikes || 3}
           message={warningMessage}

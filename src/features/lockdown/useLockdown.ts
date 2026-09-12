@@ -2,6 +2,35 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { ViolationType } from '@/types';
 import { playSecurityWarningSound } from '@/lib/sound';
 
+export const isFullscreenSupported = (): boolean => {
+  if (typeof document === 'undefined') return false;
+  return !!(
+    document.fullscreenEnabled ||
+    (document as any).webkitFullscreenEnabled ||
+    (document as any).mozFullScreenEnabled ||
+    (document as any).msFullscreenEnabled
+  );
+};
+
+export const getFullscreenElement = (): Element | null => {
+  if (typeof document === 'undefined') return null;
+  return (
+    document.fullscreenElement ||
+    (document as any).webkitFullscreenElement ||
+    (document as any).mozFullScreenElement ||
+    (document as any).msFullscreenElement ||
+    null
+  );
+};
+
+export const isMobileDevice = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (Boolean(navigator.maxTouchPoints) && navigator.maxTouchPoints > 1)
+  );
+};
+
 interface UseLockdownOptions {
   isActive: boolean;
   maxStrikes: number;
@@ -17,7 +46,7 @@ export function useLockdown({
   onViolation,
   onDisqualify,
 }: UseLockdownOptions) {
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => !isFullscreenSupported() || !!getFullscreenElement());
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [warningCount, setWarningCount] = useState<number>(currentStrikes);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
@@ -32,14 +61,23 @@ export function useLockdown({
     setWarningCount(currentStrikes);
   }, [currentStrikes]);
 
-  // Request fullscreen utility
+  // Request fullscreen utility (cross-browser with mobile fallback)
   const enterFullscreen = useCallback(async () => {
     try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
+      const docEl = document.documentElement as any;
+      if (!getFullscreenElement() && isFullscreenSupported()) {
+        if (docEl.requestFullscreen) {
+          await docEl.requestFullscreen();
+        } else if (docEl.webkitRequestFullscreen) {
+          await docEl.webkitRequestFullscreen();
+        } else if (docEl.mozRequestFullScreen) {
+          await docEl.mozRequestFullScreen();
+        } else if (docEl.msRequestFullscreen) {
+          await docEl.msRequestFullscreen();
+        }
       }
     } catch (err) {
-      console.error('Fullscreen request failed:', err);
+      console.warn('Fullscreen request not supported or declined on this device:', err);
     } finally {
       setIsFullscreen(true);
       setWarningMessage(null);
@@ -120,18 +158,18 @@ export function useLockdown({
 
     // 1. Fullscreen change listener (Warning first before strike)
     const handleFullscreenChange = () => {
-      const inFullscreen = !!document.fullscreenElement;
+      const inFullscreen = !isFullscreenSupported() || !!getFullscreenElement();
       setIsFullscreen(inFullscreen);
 
-      if (!inFullscreen) {
-        // User clicked Exit Full Screen / Cancel / Esc
+      if (!inFullscreen && isFullscreenSupported()) {
+        // User clicked Exit Full Screen / Cancel / Esc on a device supporting fullscreen
         startGraceWarning(
           'fullscreen_exit',
           '⚠️ SECURITY WARNING: You exited full-screen examination mode! Return to full-screen immediately. You have 10 seconds before a violation strike is recorded.',
           'Exited full-screen and did not return within 10s grace period'
         );
-      } else {
-        // Returned safely to fullscreen!
+      } else if (inFullscreen) {
+        // Returned safely to fullscreen / active focus!
         if (graceTimerRef.current) {
           clearInterval(graceTimerRef.current);
           graceTimerRef.current = null;
@@ -144,9 +182,14 @@ export function useLockdown({
 
     // 2. Window Blur (User clicked on another window or app)
     const handleWindowBlur = () => {
+      // If user on mobile merely tapped an input and the page is still visible, ignore synthetic keyboard blur
+      if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && !document.hidden) {
+        return;
+      }
+
       startGraceWarning(
         'window_switch',
-        '⚠️ SECURITY WARNING: You navigated away to another window! Click back into the examination window immediately. You have 10 seconds before a violation strike is recorded.',
+        '⚠️ SECURITY WARNING: You navigated away to another window or app! Return to the examination immediately. You have 10 seconds before a violation strike is recorded.',
         'Switched to another application or window and did not return within 10s'
       );
     };
@@ -154,7 +197,7 @@ export function useLockdown({
     // 3. Window Focus (User returned to the exam window)
     const handleWindowFocus = () => {
       document.title = originalTitleRef.current;
-      if (document.fullscreenElement) {
+      if (!isFullscreenSupported() || !!getFullscreenElement()) {
         if (graceTimerRef.current) {
           clearInterval(graceTimerRef.current);
           graceTimerRef.current = null;
@@ -164,7 +207,7 @@ export function useLockdown({
       }
     };
 
-    // 4. Tab visibility change (minimized or switched tab)
+    // 4. Tab visibility change (minimized or switched tab / switched app)
     const handleVisibilityChange = () => {
       if (document.hidden) {
         startGraceWarning(
@@ -174,11 +217,29 @@ export function useLockdown({
         );
       } else {
         document.title = originalTitleRef.current;
+        if (!isFullscreenSupported() || !!getFullscreenElement()) {
+          if (graceTimerRef.current) {
+            clearInterval(graceTimerRef.current);
+            graceTimerRef.current = null;
+          }
+          setGraceSeconds(null);
+          setWarningMessage(null);
+        }
       }
     };
 
-    // 5. Mouse leave detection (Exit intent before leaving)
+    // 5. Pagehide (Mobile app switch / screen lock / browser minimize on iOS & Android)
+    const handlePageHide = () => {
+      startGraceWarning(
+        'window_switch',
+        '⚠️ SECURITY WARNING: Switched application or minimized examination! Return to the exam immediately.',
+        'Switched application or minimized window on mobile device'
+      );
+    };
+
+    // 6. Mouse leave detection (Exit intent before leaving desktop viewport)
     const handleMouseLeave = (e: MouseEvent) => {
+      if (isMobileDevice()) return; // Ignore synthetic mouse events on mobile touchscreens
       if (e.clientY <= 5) {
         playSecurityWarningSound();
         setCursorWarning('⚠️ CAUTION: Cursor leaving exam viewport. Keep your mouse focused on the examination.');
@@ -188,14 +249,14 @@ export function useLockdown({
       setCursorWarning(null);
     };
 
-    // 6. Context menu (right-click) prevention
+    // 7. Context menu (right-click / long-press context menu) prevention
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       playSecurityWarningSound();
       triggerViolation('context_menu', 'Right-click context menu is disabled during exam');
     };
 
-    // 7. Copy / Paste / Cut prevention
+    // 8. Copy / Paste / Cut prevention
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
       playSecurityWarningSound();
@@ -212,7 +273,7 @@ export function useLockdown({
       triggerViolation('copy_paste', 'Clipboard cut action is strictly prohibited');
     };
 
-    // 8. Forbidden keyboard shortcuts
+    // 9. Forbidden keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
@@ -243,19 +304,18 @@ export function useLockdown({
       if (e.key === 'Escape') {
         e.preventDefault();
         playSecurityWarningSound();
-        // Browser will fire handleFullscreenChange which handles the 10-second warning!
         return;
       }
     };
 
-    // 9. Prevent tab closing or accidental navigation (beforeunload)
+    // 10. Prevent tab closing or accidental navigation (beforeunload)
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = 'Examination is currently in progress. You cannot exit without submitting.';
       return e.returnValue;
     };
 
-    // 10. Trap browser back / forward navigation
+    // 11. Trap browser back / forward navigation (popstate)
     window.history.pushState(null, '', window.location.href);
     const handlePopState = () => {
       window.history.pushState(null, '', window.location.href);
@@ -263,7 +323,11 @@ export function useLockdown({
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('blur', handleWindowBlur);
     window.addEventListener('focus', handleWindowFocus);
     document.addEventListener('mouseleave', handleMouseLeave);
@@ -277,11 +341,15 @@ export function useLockdown({
     window.addEventListener('popstate', handlePopState);
 
     // Initial check
-    setIsFullscreen(!!document.fullscreenElement);
+    setIsFullscreen(!isFullscreenSupported() || !!getFullscreenElement());
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('focus', handleWindowFocus);
       document.removeEventListener('mouseleave', handleMouseLeave);
