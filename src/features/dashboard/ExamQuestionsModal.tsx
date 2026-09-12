@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, CheckCircle, Award } from 'lucide-react';
+import { HelpCircle, CheckCircle, Award, Edit3 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Question } from '@/types';
 import { Modal } from '@/components/ui/modal';
@@ -12,6 +12,7 @@ interface ExamQuestionsModalProps {
   onClose: () => void;
   examId: string;
   examTitle: string;
+  onEdit?: () => void;
 }
 
 export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
@@ -19,6 +20,7 @@ export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
   onClose,
   examId,
   examTitle,
+  onEdit,
 }) => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -60,15 +62,30 @@ export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
     <Modal isOpen={isOpen} onClose={onClose} title={`Exam Questions: ${examTitle}`} maxWidth="2xl">
       <div className="space-y-5">
         <div className="flex items-center justify-between text-xs text-slate-500 pb-3 border-b border-slate-100">
-          <span>
-            Total Items: <strong className="text-slate-900 font-bold">{questions.length}</strong>
-          </span>
-          <span>
-            Total Points:{' '}
-            <strong className="text-emerald-600 font-bold">
-              {questions.reduce((sum, q) => sum + Number(q.points), 0)} pts
-            </strong>
-          </span>
+          <div className="flex items-center space-x-4">
+            <span>
+              Total Items: <strong className="text-slate-900 font-bold">{questions.length}</strong>
+            </span>
+            <span>
+              Total Points:{' '}
+              <strong className="text-emerald-600 font-bold">
+                {questions.reduce((sum, q) => sum + Number(q.points), 0)} pts
+              </strong>
+            </span>
+          </div>
+          {onEdit && (
+            <button
+              onClick={() => {
+                onClose();
+                onEdit();
+              }}
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs transition-colors cursor-pointer border border-blue-200"
+              title="Edit all questions, choices, and exam template in builder"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Edit in Builder</span>
+            </button>
+          )}
         </div>
 
         {isLoading ? (

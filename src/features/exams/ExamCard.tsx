@@ -6,11 +6,13 @@ import {
   ShieldAlert,
   HelpCircle,
   Copy,
+  CopyPlus,
   Check,
   BarChart3,
   Table,
   Globe,
   Archive,
+  ArchiveRestore,
   Trash2,
   Edit3,
   UserCheck,
@@ -28,8 +30,8 @@ interface ExamCardProps {
   onStatusChange: (id: string, status: 'draft' | 'published' | 'archived') => void;
   onDelete: (id: string) => void;
   onUpdated?: () => void;
-  onEdit: (exam: Exam) => void;
-  onCopy: (exam: Exam) => void;
+  onEdit?: (exam: Exam) => void;
+  onCopy?: (exam: Exam) => void;
 }
 
 export const ExamCard: React.FC<ExamCardProps> = ({
@@ -118,9 +120,9 @@ export const ExamCard: React.FC<ExamCardProps> = ({
               </span>
             </div>
             <button
-              onClick={() => setIsScheduleModalOpen(true)}
+              onClick={() => (onEdit ? onEdit(exam) : setIsScheduleModalOpen(true))}
               className="text-[11px] text-blue-700 hover:text-blue-800 font-bold flex items-center space-x-1 flex-shrink-0 cursor-pointer ml-2 hover:underline"
-              title="Edit Schedule & Time"
+              title="Edit Full Exam Template & Questions"
             >
               <Edit3 className="w-3 h-3" />
               <span>Edit</span>
@@ -171,7 +173,7 @@ export const ExamCard: React.FC<ExamCardProps> = ({
             variant="outline"
             size="sm"
             onClick={() => setIsQuestionsModalOpen(true)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50"
             title="View Questions & Answers"
           >
             <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
@@ -182,58 +184,34 @@ export const ExamCard: React.FC<ExamCardProps> = ({
             variant="outline"
             size="sm"
             onClick={() => navigate(`/admin/exam/${exam.id}/grades`)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50"
             title="Question-by-Question Grade Sheet"
           >
             <Table className="w-3.5 h-3.5 text-emerald-600" />
             <span>Grades</span>
           </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onCopy(exam)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
-            title="Copy & duplicate this exam as a reference template"
-          >
-            <Copy className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Copy</span>
-          </Button>
         </div>
 
         <div className="flex items-center space-x-1 self-end sm:self-auto">
-          {/* Copy Icon Button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onCopy(exam)}
-            title="Copy & duplicate as reference template"
-            className="text-xs text-slate-500 hover:text-indigo-700 p-1.5 hover:bg-indigo-50 cursor-pointer"
+          {/* Copy Exam as Reference */}
+          <button
+            onClick={() => onCopy && onCopy(exam)}
+            title="Duplicate / Copy Exam as Reference"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
           >
-            <Copy className="w-3.5 h-3.5" />
-          </Button>
+            <CopyPlus className="w-3.5 h-3.5" />
+          </button>
 
-          {/* Edit Template Icon Button - positioned strictly on the LEFT of the Archive/Publish icon */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onEdit(exam)}
-            title="Edit Full Exam Template (Questions, Answers & Settings)"
-            className="text-xs text-slate-500 hover:text-blue-700 p-1.5 hover:bg-blue-50 cursor-pointer"
+          {/* Edit Exam Template & Questions - strictly on the left of Archive */}
+          <button
+            onClick={() => (onEdit ? onEdit(exam) : setIsScheduleModalOpen(true))}
+            title="Edit Full Exam Template, Questions & Answers"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
           >
             <Edit3 className="w-3.5 h-3.5" />
-          </Button>
+          </button>
 
-          {exam.status !== 'published' && (
-            <button
-              onClick={() => onStatusChange(exam.id, 'published')}
-              title="Publish Exam"
-              className="px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200 cursor-pointer"
-            >
-              Publish
-            </button>
-          )}
-
+          {/* Archive / Status Button */}
           {exam.status === 'published' && (
             <button
               onClick={() => onStatusChange(exam.id, 'archived')}
@@ -244,6 +222,27 @@ export const ExamCard: React.FC<ExamCardProps> = ({
             </button>
           )}
 
+          {exam.status === 'archived' && (
+            <button
+              onClick={() => onStatusChange(exam.id, 'published')}
+              title="Unarchive & Publish Exam"
+              className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+            >
+              <ArchiveRestore className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {exam.status === 'draft' && (
+            <button
+              onClick={() => onStatusChange(exam.id, 'published')}
+              title="Publish Exam"
+              className="px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors border border-emerald-200 cursor-pointer"
+            >
+              Publish
+            </button>
+          )}
+
+          {/* Delete Exam */}
           <button
             onClick={() => onDelete(exam.id)}
             title="Delete Exam"
@@ -260,6 +259,10 @@ export const ExamCard: React.FC<ExamCardProps> = ({
         onClose={() => setIsQuestionsModalOpen(false)}
         examId={exam.id}
         examTitle={exam.title}
+        onEdit={() => {
+          setIsQuestionsModalOpen(false);
+          if (onEdit) onEdit(exam);
+        }}
       />
 
       {/* Edit Schedule Modal */}
