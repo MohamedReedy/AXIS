@@ -20,7 +20,7 @@ import { useLockdown } from '@/features/lockdown/useLockdown';
 import { LockdownOverlay } from '@/components/lockdown/LockdownOverlay';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { formatDate, formatTimeRemaining } from '@/lib/utils';
+import { formatDate, formatTimeRemaining, getExamSlug } from '@/lib/utils';
 import { parseExamConfig } from '@/lib/examConfig';
 
 type ExamStep = 'lobby' | 'rules' | 'taking' | 'completed' | 'disqualified' | 'expired';
@@ -83,14 +83,57 @@ export const StudentExamFlow: React.FC = () => {
 
     const fetchPublicExam = async () => {
       try {
-        const { data, error: examErr } = await supabase
-          .from('exams')
-          .select('id, title, description, instructions, status, start_time, end_time, duration_minutes, max_strikes')
-          .eq('id', examId)
-          .single();
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(examId);
+        let examObj: Exam | null = null;
 
-        if (examErr) throw examErr;
-        const examObj = data as Exam;
+        if (isUUID) {
+          const { data, error: examErr } = await supabase
+            .from('exams')
+            .select('id, title, description, instructions, status, start_time, end_time, duration_minutes, max_strikes')
+            .eq('id', examId)
+            .single();
+
+          if (examErr) throw examErr;
+          examObj = data as Exam;
+        } else {
+          // Slug or clean title search (e.g. /exam/test or /exam/midterm-physics)
+          const decodedParam = decodeURIComponent(examId).trim();
+          const targetSlug = getExamSlug(decodedParam);
+
+          // 1. Try exact or case-insensitive title match
+          const { data: titleMatch } = await supabase
+            .from('exams')
+            .select('id, title, description, instructions, status, start_time, end_time, duration_minutes, max_strikes')
+            .ilike('title', decodedParam.replace(/-/g, ' '))
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (titleMatch) {
+            examObj = titleMatch as Exam;
+          } else {
+            // 2. Query exams and match against generated slug
+            const { data: allExams, error: allErr } = await supabase
+              .from('exams')
+              .select('id, title, description, instructions, status, start_time, end_time, duration_minutes, max_strikes')
+              .order('created_at', { ascending: false });
+
+            if (allErr) throw allErr;
+            if (allExams && allExams.length > 0) {
+              const matched = allExams.find(
+                (e) => getExamSlug(e.title) === targetSlug || e.title.toLowerCase() === decodedParam.toLowerCase()
+              );
+              if (matched) {
+                examObj = matched as Exam;
+              }
+            }
+          }
+
+          if (!examObj) {
+            throw new Error(`Examination "${decodedParam}" not found or link is invalid.`);
+          }
+        }
+
         setExam(examObj);
 
         // Schedule check

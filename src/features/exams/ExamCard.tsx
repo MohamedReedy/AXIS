@@ -17,7 +17,7 @@ import {
 import { Exam } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatDate } from '@/lib/utils';
+import { formatDate, getExamSlug } from '@/lib/utils';
 import { ExamQuestionsModal } from '../dashboard/ExamQuestionsModal';
 import { EditScheduleModal } from '../dashboard/EditScheduleModal';
 
@@ -34,7 +34,7 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const navigate = useNavigate();
 
-  const studentLink = `${window.location.origin}/exam/${exam.id}`;
+  const studentLink = `${window.location.origin}/exam/${getExamSlug(exam.title) || exam.id}`;
 
   const handleCopyLink = async () => {
     try {

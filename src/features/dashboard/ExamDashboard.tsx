@@ -29,7 +29,7 @@ import { AdminLayout } from '@/layouts/AdminLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { formatDate } from '@/lib/utils';
+import { formatDate, getExamSlug } from '@/lib/utils';
 import { ExamQuestionsModal } from './ExamQuestionsModal';
 import { EditScheduleModal } from './EditScheduleModal';
 
@@ -241,7 +241,7 @@ export const ExamDashboard: React.FC = () => {
 
   const handleCopyLink = async () => {
     if (!exam) return;
-    const link = `${window.location.origin}/exam/${exam.id}`;
+    const link = `${window.location.origin}/exam/${getExamSlug(exam.title) || exam.id}`;
     await navigator.clipboard.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -344,7 +344,7 @@ export const ExamDashboard: React.FC = () => {
     return true;
   });
 
-  const studentLink = exam ? `${window.location.origin}/exam/${exam.id}` : '';
+  const studentLink = exam ? `${window.location.origin}/exam/${getExamSlug(exam.title) || exam.id}` : '';
 
   return (
     <AdminLayout title={exam?.title || 'Exam Dashboard'} subtitle="Realtime proctoring, live submissions, and anti-cheat telemetry">

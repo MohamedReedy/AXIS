@@ -29,3 +29,13 @@ export function formatTimeRemaining(seconds: number): string {
     s.toString().padStart(2, '0')
   ].join(':');
 }
+
+export function getExamSlug(title: string | null | undefined): string {
+  if (!title) return '';
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
