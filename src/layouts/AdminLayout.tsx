@@ -50,11 +50,13 @@ export const AdminLayout: React.FC<{
         <div className="space-y-6">
           {/* Brand Header */}
           <Link to="/admin" className="flex items-center space-x-3 px-1 group">
-            <img
-              src="/axis-logo.png"
-              alt="AXIS"
-              className="w-10 h-10 object-contain shadow-md group-hover:scale-105 transition-transform"
-            />
+            <div className="w-10 h-10 rounded-xl bg-white p-1 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform flex-shrink-0">
+              <img
+                src="/axis-logo.png"
+                alt="AXIS"
+                className="w-full h-full object-contain"
+              />
+            </div>
             <div className="flex flex-col">
               <span className="font-black text-lg text-white tracking-tight">AXIS</span>
               <span className="text-[11px] text-cyan-400 font-semibold tracking-wider uppercase">

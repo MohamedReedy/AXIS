@@ -63,11 +63,11 @@ export const LoginPage: React.FC = () => {
 
         {/* Top brand header */}
         <div className="relative z-10 flex items-center space-x-4">
-          <div className="w-13 h-13 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 p-2 flex items-center justify-center shadow-lg shadow-black/20">
+          <div className="w-12 h-12 rounded-xl bg-white p-1.5 flex items-center justify-center shadow-lg shadow-black/20 flex-shrink-0">
             <img
               src="/axis-logo.png"
               alt="AXIS"
-              className="w-full h-full object-contain filter drop-shadow"
+              className="w-full h-full object-contain"
             />
           </div>
           <div>
