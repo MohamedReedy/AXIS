@@ -55,11 +55,11 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row w-full bg-slate-50 selection:bg-axis-blue/20">
-      {/* Left Column: AXIS Brand Showcase with Blue Gradient */}
-      <div className="w-full lg:w-1/2 bg-gradient-to-br from-[#0B1120] via-[#003B94] to-[#0052D4] text-white p-8 sm:p-12 lg:p-16 flex flex-col justify-between relative overflow-hidden">
+      {/* Left Column: AXIS Brand Showcase with Deep Dark Blue Gradient */}
+      <div className="w-full lg:w-1/2 bg-gradient-to-br from-[#070D1C] via-[#0A224D] to-[#0E3875] text-white p-8 sm:p-12 lg:p-16 flex flex-col justify-between relative overflow-hidden">
         {/* Ambient lighting effects */}
-        <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#00D2FF]/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#0052D4]/30 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#00D2FF]/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#0E3875]/40 rounded-full blur-3xl pointer-events-none" />
 
         {/* Top brand header */}
         <div className="relative z-10 flex items-center space-x-4">
@@ -203,7 +203,7 @@ export const LoginPage: React.FC = () => {
               <Button
                 type="submit"
                 size="lg"
-                className="w-full flex items-center justify-center space-x-2 mt-4 bg-[#0052D4] hover:bg-[#0041A8] active:bg-[#00358A] text-white font-bold py-3 shadow-xs hover:shadow-md hover:brightness-105 transition-all cursor-pointer border border-[#0052D4]"
+                className="w-full flex items-center justify-center space-x-2 mt-4 bg-[#0B3A82] hover:bg-[#082C66] active:bg-[#062252] text-white font-bold py-3 shadow-xs hover:shadow-md hover:brightness-105 transition-all cursor-pointer border border-[#0B3A82]"
                 isLoading={loading}
               >
                 <span>{isSignUp ? 'Create Account' : 'Sign In'}</span>
