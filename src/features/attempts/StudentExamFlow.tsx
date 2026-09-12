@@ -12,6 +12,7 @@ import {
   Send,
   Lock,
   UserCheck,
+  ShieldAlert,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +20,7 @@ import { Exam, Question, QuestionChoice, AttemptStatus, ViolationType } from '@/
 import { StudentLayout } from '@/layouts/StudentLayout';
 import { useLockdown, isFullscreenSupported } from '@/features/lockdown/useLockdown';
 import { LockdownOverlay } from '@/components/lockdown/LockdownOverlay';
+import { ForensicWatermark } from '@/components/lockdown/ForensicWatermark';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatDate, formatTimeRemaining, getExamSlug, parseQuestionContent } from '@/lib/utils';
@@ -319,7 +321,16 @@ export const StudentExamFlow: React.FC = () => {
   };
 
   // Anti-Cheat Lockdown Hook
-  const { isFullscreen, warningMessage, warningCount, graceSeconds, cursorWarning, enterFullscreen } = useLockdown({
+  const {
+    isFullscreen,
+    isPrivacyShieldActive,
+    warningMessage,
+    warningCount,
+    graceSeconds,
+    cursorWarning,
+    enterFullscreen,
+    clearWarning,
+  } = useLockdown({
     isActive: step === 'taking',
     maxStrikes: exam?.max_strikes || 3,
     currentStrikes: strikes,
@@ -760,14 +771,43 @@ export const StudentExamFlow: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-40 bg-slate-50 text-slate-900 flex flex-col lockdown-active">
-        {/* Anti-Cheat Overlay (pops up on violation) */}
+        {/* Anti-Cheat Overlay (pops up on violation or fullscreen exit) */}
         <LockdownOverlay
           isVisible={(!isFullscreen && isFullscreenSupported()) || !!warningMessage}
           warningCount={warningCount}
           maxStrikes={exam?.max_strikes || 3}
           message={warningMessage}
           graceSeconds={graceSeconds}
-          onReturnToFullscreen={enterFullscreen}
+          onReturnToFullscreen={async () => {
+            await enterFullscreen();
+            clearWarning();
+          }}
+        />
+
+        {/* Security Curtain: Instant Blackout Privacy Shield during focus-loss, window-blur, or app-switch */}
+        {isPrivacyShieldActive && (
+          <div className="fixed inset-0 z-[99999] bg-slate-950/98 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center select-none animate-in fade-in duration-100">
+            <div className="w-16 h-16 rounded-3xl bg-red-950/80 border-2 border-red-500/50 flex items-center justify-center text-red-400 mb-4 shadow-xl shadow-red-950/50 animate-pulse">
+              <ShieldAlert className="w-9 h-9" />
+            </div>
+            <div className="inline-block px-3.5 py-1 rounded-full bg-red-950/60 border border-red-800/60 text-red-400 text-[11px] font-mono font-black uppercase tracking-widest mb-3">
+              AXIS Security Shield Active
+            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Examination Content Protected
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-sm mt-2 leading-relaxed">
+              Window focus lost or screen capture detected. Return to the examination tab immediately. Navigating away is logged as an anti-cheat strike.
+            </p>
+          </div>
+        )}
+
+        {/* Dynamic Forensic Candidate Watermark across the entire examination */}
+        <ForensicWatermark
+          studentName={studentName}
+          studentEmail={studentEmail}
+          studentCode={studentCode}
+          attemptId={attemptId}
         />
 
         {/* Top Header Bar with Logo, Timer & Strike Count */}
@@ -827,7 +867,11 @@ export const StudentExamFlow: React.FC = () => {
         )}
 
         {/* Exam Body - Section 6 Prototype Split Layout */}
-        <main className="flex-1 max-w-[1460px] w-full mx-auto p-4 sm:p-6 flex flex-col justify-between overflow-y-auto">
+        <main
+          className={`flex-1 max-w-[1460px] w-full mx-auto p-4 sm:p-6 flex flex-col justify-between overflow-y-auto transition-all duration-150 ${
+            isPrivacyShieldActive ? 'filter blur-2xl opacity-0 pointer-events-none' : ''
+          }`}
+        >
           {/* Breadcrumb strip */}
           <div className="hero-axis mb-5 py-3.5 px-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

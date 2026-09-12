@@ -67,7 +67,11 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
           </span>
 
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-            {isCritical ? 'EXAM TERMINATED (DISQUALIFIED)' : '⚠️ SECURITY ALERT: EXAM FOCUS LOST'}
+            {isCritical
+              ? 'EXAM TERMINATED (DISQUALIFIED)'
+              : graceSeconds !== null
+              ? '⚠️ SECURITY ALERT: EXAM FOCUS LOST'
+              : '🚨 SECURITY VIOLATION RECORDED'}
           </h2>
 
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-md mx-auto">
@@ -102,7 +106,13 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
             className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-axis-blue to-blue-700 hover:from-blue-700 hover:to-blue-800 active:scale-[0.98] text-white font-bold py-3.5 px-6 rounded-2xl transition-all shadow-md shadow-blue-600/30 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer text-sm"
           >
             <Maximize2 className="w-4 h-4" />
-            <span>{isFsSupported ? 'Return to Fullscreen & Resume Exam' : 'Resume Examination'}</span>
+            <span>
+              {graceSeconds !== null
+                ? isFsSupported
+                  ? 'Return to Fullscreen & Resume Exam'
+                  : 'Resume Examination'
+                : 'Acknowledge Strike & Resume Examination'}
+            </span>
           </button>
         ) : (
           <div className="p-3.5 bg-red-50 rounded-xl text-xs text-red-700 border border-red-200 font-medium">

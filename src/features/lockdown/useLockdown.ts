@@ -51,10 +51,14 @@ export function useLockdown({
   const [warningCount, setWarningCount] = useState<number>(currentStrikes);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const [cursorWarning, setCursorWarning] = useState<string | null>(null);
+  const [isPrivacyShieldActive, setIsPrivacyShieldActive] = useState<boolean>(false);
 
   const graceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isReportingRef = useRef<boolean>(false);
   const originalTitleRef = useRef<string>(document.title);
+  const departureTimeRef = useRef<number | null>(null);
+  const departureReasonRef = useRef<string>('');
+  const departureTypeRef = useRef<ViolationType>('tab_blur');
 
   // Sync warning count when parent updates strikes
   useEffect(() => {
@@ -82,6 +86,7 @@ export function useLockdown({
       setIsFullscreen(true);
       setWarningMessage(null);
       setCursorWarning(null);
+      setIsPrivacyShieldActive(false);
       document.title = originalTitleRef.current;
       if (graceTimerRef.current) {
         clearInterval(graceTimerRef.current);
@@ -91,7 +96,7 @@ export function useLockdown({
     }
   }, []);
 
-  // Trigger official violation reporting after warning period expires
+  // Trigger official violation reporting
   const triggerViolation = useCallback(
     async (type: ViolationType, details: string) => {
       if (!isActive || isReportingRef.current) return;
@@ -106,7 +111,7 @@ export function useLockdown({
           onDisqualify();
         } else {
           setWarningMessage(
-            `SECURITY WARNING (${result.strike_count}/${maxStrikes}): ${details}. Return to full-screen immediately.`
+            `SECURITY VIOLATION (${result.strike_count}/${maxStrikes}): ${details}. Return to examination immediately.`
           );
         }
       } catch (err) {
@@ -114,13 +119,13 @@ export function useLockdown({
       } finally {
         setTimeout(() => {
           isReportingRef.current = false;
-        }, 1000);
+        }, 1200);
       }
     },
     [isActive, maxStrikes, onViolation, onDisqualify]
   );
 
-  // Start warning grace countdown BEFORE taking any punitive action
+  // Start warning grace countdown BEFORE taking punitive action (used for desktop fullscreen exits)
   const startGraceWarning = useCallback(
     (type: ViolationType, warningText: string, violationDetails: string) => {
       if (!isActive) return;
@@ -129,25 +134,24 @@ export function useLockdown({
       setWarningMessage(warningText);
       document.title = '🚨 RETURN TO EXAM NOW!';
 
-      let countdown = 10;
-      setGraceSeconds(countdown);
+      const targetEndTime = Date.now() + 10000;
+      setGraceSeconds(10);
 
       if (graceTimerRef.current) clearInterval(graceTimerRef.current);
 
       graceTimerRef.current = setInterval(() => {
-        countdown -= 1;
-        setGraceSeconds(countdown);
+        const remaining = Math.max(0, Math.ceil((targetEndTime - Date.now()) / 1000));
+        setGraceSeconds(remaining);
 
-        if (countdown <= 0) {
+        if (remaining <= 0) {
           if (graceTimerRef.current) {
             clearInterval(graceTimerRef.current);
             graceTimerRef.current = null;
           }
           document.title = originalTitleRef.current;
-          // Grace period elapsed without returning: NOW take official punitive action
           triggerViolation(type, violationDetails);
         }
-      }, 1000);
+      }, 500);
     },
     [isActive, triggerViolation]
   );
@@ -156,90 +160,126 @@ export function useLockdown({
     if (!isActive) return;
     originalTitleRef.current = document.title;
 
-    // 1. Fullscreen change listener (Warning first before strike)
-    const handleFullscreenChange = () => {
-      const inFullscreen = !isFullscreenSupported() || !!getFullscreenElement();
-      setIsFullscreen(inFullscreen);
-
-      if (!inFullscreen && isFullscreenSupported()) {
-        // User clicked Exit Full Screen / Cancel / Esc on a device supporting fullscreen
-        startGraceWarning(
-          'fullscreen_exit',
-          '⚠️ SECURITY WARNING: You exited full-screen examination mode! Return to full-screen immediately. You have 10 seconds before a violation strike is recorded.',
-          'Exited full-screen and did not return within 10s grace period'
-        );
-      } else if (inFullscreen) {
-        // Returned safely to fullscreen / active focus!
-        if (graceTimerRef.current) {
-          clearInterval(graceTimerRef.current);
-          graceTimerRef.current = null;
-        }
-        setGraceSeconds(null);
-        setWarningMessage(null);
-        document.title = originalTitleRef.current;
-      }
-    };
-
-    // 2. Window Blur (User clicked on another window or app)
-    const handleWindowBlur = () => {
-      // If user on mobile merely tapped an input and the page is still visible, ignore synthetic keyboard blur
-      if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && !document.hidden) {
+    // Handle departure (window blur, tab hidden, pagehide)
+    const handleDeparture = (type: ViolationType, reason: string) => {
+      // Ignore blur if student is typing in an input/textarea and document is still visible
+      if (
+        document.activeElement &&
+        ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) &&
+        !document.hidden
+      ) {
         return;
       }
 
-      startGraceWarning(
-        'window_switch',
-        '⚠️ SECURITY WARNING: You navigated away to another window or app! Return to the examination immediately. You have 10 seconds before a violation strike is recorded.',
-        'Switched to another application or window and did not return within 10s'
-      );
+      // Activate Privacy Shield immediately to mask exam content from OS screenshots / multitasking previews
+      setIsPrivacyShieldActive(true);
+
+      if (departureTimeRef.current === null) {
+        departureTimeRef.current = Date.now();
+        departureReasonRef.current = reason;
+        departureTypeRef.current = type;
+      }
     };
 
-    // 3. Window Focus (User returned to the exam window)
-    const handleWindowFocus = () => {
+    // Handle return (window focus, tab visible)
+    const handleReturn = () => {
+      // Always remove privacy shield when candidate is actively back
+      setIsPrivacyShieldActive(false);
       document.title = originalTitleRef.current;
+
+      if (departureTimeRef.current !== null) {
+        const awayMs = Date.now() - departureTimeRef.current;
+        const awaySeconds = Math.max(1, Math.round(awayMs / 1000));
+        const savedReason = departureReasonRef.current;
+        const savedType = departureTypeRef.current || 'tab_blur';
+
+        departureTimeRef.current = null;
+        departureReasonRef.current = '';
+
+        // If away for >= 1500ms (1.5s), this is an intentional app/tab switch -> STRIKE!
+        if (awayMs >= 1500) {
+          playSecurityWarningSound();
+          if (graceTimerRef.current) {
+            clearInterval(graceTimerRef.current);
+            graceTimerRef.current = null;
+          }
+          setGraceSeconds(null);
+
+          const fullReason = `${savedReason} (${awaySeconds}s away)`;
+          triggerViolation(savedType, fullReason);
+          return;
+        }
+      }
+
+      // If returning quickly or restoring fullscreen
       if (!isFullscreenSupported() || !!getFullscreenElement()) {
         if (graceTimerRef.current) {
           clearInterval(graceTimerRef.current);
           graceTimerRef.current = null;
         }
         setGraceSeconds(null);
-        setWarningMessage(null);
       }
+    };
+
+    // 1. Fullscreen change listener
+    const handleFullscreenChange = () => {
+      const inFullscreen = !isFullscreenSupported() || !!getFullscreenElement();
+      setIsFullscreen(inFullscreen);
+
+      if (!inFullscreen && isFullscreenSupported()) {
+        // User clicked Exit Full Screen on a device supporting fullscreen
+        startGraceWarning(
+          'fullscreen_exit',
+          '⚠️ SECURITY WARNING: You exited full-screen examination mode! Return to full-screen immediately. You have 10 seconds before a violation strike is recorded.',
+          'Exited full-screen and did not return within 10s grace period'
+        );
+      } else if (inFullscreen) {
+        handleReturn();
+      }
+    };
+
+    // 2. Window Blur (User clicked on another window, opened another app, or snipping tool)
+    const handleWindowBlur = () => {
+      handleDeparture(
+        'window_switch',
+        isMobileDevice()
+          ? 'Switched mobile app or minimized examination'
+          : 'Switched away to another application or window'
+      );
+    };
+
+    // 3. Window Focus (User returned to the exam window)
+    const handleWindowFocus = () => {
+      handleReturn();
     };
 
     // 4. Tab visibility change (minimized or switched tab / switched app)
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        startGraceWarning(
+        handleDeparture(
           'tab_blur',
-          '⚠️ SECURITY WARNING: Switched browser tab or minimized examination! Return to the exam tab immediately.',
-          'Switched browser tab or minimized window'
+          isMobileDevice()
+            ? 'Switched mobile app or minimized browser'
+            : 'Switched browser tab or minimized window'
         );
       } else {
-        document.title = originalTitleRef.current;
-        if (!isFullscreenSupported() || !!getFullscreenElement()) {
-          if (graceTimerRef.current) {
-            clearInterval(graceTimerRef.current);
-            graceTimerRef.current = null;
-          }
-          setGraceSeconds(null);
-          setWarningMessage(null);
-        }
+        handleReturn();
       }
     };
 
     // 5. Pagehide (Mobile app switch / screen lock / browser minimize on iOS & Android)
     const handlePageHide = () => {
-      startGraceWarning(
+      handleDeparture(
         'window_switch',
-        '⚠️ SECURITY WARNING: Switched application or minimized examination! Return to the exam immediately.',
-        'Switched application or minimized window on mobile device'
+        isMobileDevice()
+          ? 'Switched to another application or minimized browser'
+          : 'Switched application or minimized window'
       );
     };
 
     // 6. Mouse leave detection (Exit intent before leaving desktop viewport)
     const handleMouseLeave = (e: MouseEvent) => {
-      if (isMobileDevice()) return; // Ignore synthetic mouse events on mobile touchscreens
+      if (isMobileDevice()) return;
       if (e.clientY <= 5) {
         playSecurityWarningSound();
         setCursorWarning('⚠️ CAUTION: Cursor leaving exam viewport. Keep your mouse focused on the examination.');
@@ -273,21 +313,53 @@ export function useLockdown({
       triggerViolation('copy_paste', 'Clipboard cut action is strictly prohibited');
     };
 
-    // 9. Forbidden keyboard shortcuts
+    // 9. Forbidden keyboard shortcuts & Anti-Screenshot Interception
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
-      // F12 or Inspect
-      if (e.key === 'F12' || (isCtrlOrCmd && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C'))) {
+      // PrintScreen key
+      if (e.key === 'PrintScreen' || e.keyCode === 44) {
         e.preventDefault();
+        e.stopPropagation();
+        playSecurityWarningSound();
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText('⚠️ Screen capture is strictly prohibited during examination.').catch(() => {});
+        }
+        triggerViolation('forbidden_shortcut', 'Screenshot attempt blocked (PrintScreen key)');
+        return;
+      }
+
+      // Mac Screenshot shortcuts: Cmd + Shift + 3 / 4 / 5
+      if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+        playSecurityWarningSound();
+        triggerViolation('forbidden_shortcut', `Screenshot shortcut blocked (Cmd+Shift+${e.key})`);
+        return;
+      }
+
+      // Windows Snipping shortcut: Win/Ctrl + Shift + S
+      if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        e.stopPropagation();
+        playSecurityWarningSound();
+        triggerViolation('forbidden_shortcut', 'Screen snipping shortcut blocked (Win/Ctrl+Shift+S)');
+        return;
+      }
+
+      // Developer Tools: F12 or Ctrl/Cmd + Shift + I / J / C
+      if (e.key === 'F12' || (isCtrlOrCmd && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase()))) {
+        e.preventDefault();
+        e.stopPropagation();
         playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', 'Attempted to access Developer Tools');
         return;
       }
 
-      // Ctrl/Cmd + C, V, X, U, P, S
-      if (isCtrlOrCmd && ['c', 'v', 'x', 'u', 'p', 's'].includes(e.key.toLowerCase())) {
+      // Ctrl/Cmd + C, V, X, U, P (Print / Save)
+      if (isCtrlOrCmd && ['c', 'v', 'x', 'u', 'p'].includes(e.key.toLowerCase())) {
         e.preventDefault();
+        e.stopPropagation();
         playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', `Attempted forbidden shortcut (Cmd/Ctrl + ${e.key.toUpperCase()})`);
         return;
@@ -308,14 +380,24 @@ export function useLockdown({
       }
     };
 
-    // 10. Prevent tab closing or accidental navigation (beforeunload)
+    // 10. KeyUp for PrintScreen fallback (some Windows browsers only fire on keyup)
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'PrintScreen' || e.keyCode === 44) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText('⚠️ Screen capture is strictly prohibited during examination.').catch(() => {});
+        }
+        triggerViolation('forbidden_shortcut', 'Screenshot attempt blocked (PrintScreen)');
+      }
+    };
+
+    // 11. Prevent tab closing or accidental navigation (beforeunload)
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = 'Examination is currently in progress. You cannot exit without submitting.';
       return e.returnValue;
     };
 
-    // 11. Trap browser back / forward navigation (popstate)
+    // 12. Trap browser back / forward navigation (popstate)
     window.history.pushState(null, '', window.location.href);
     const handlePopState = () => {
       window.history.pushState(null, '', window.location.href);
@@ -337,6 +419,7 @@ export function useLockdown({
     document.addEventListener('paste', handlePaste);
     document.addEventListener('cut', handleCut);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('popstate', handlePopState);
 
@@ -359,6 +442,7 @@ export function useLockdown({
       document.removeEventListener('paste', handlePaste);
       document.removeEventListener('cut', handleCut);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('popstate', handlePopState);
 
@@ -371,6 +455,7 @@ export function useLockdown({
 
   return {
     isFullscreen,
+    isPrivacyShieldActive,
     warningMessage,
     warningCount,
     graceSeconds,
