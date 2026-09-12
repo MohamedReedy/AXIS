@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff, Image as ImageIcon, X, Upload } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff, Image as ImageIcon, X, Upload, ChevronUp, ChevronDown } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,7 +89,19 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
   // Remove Question
   const handleRemoveQuestion = (index: number) => {
     if (questions.length <= 1) return;
-    setQuestions(questions.filter((_, i) => i !== index));
+    const filtered = questions.filter((_, i) => i !== index);
+    setQuestions(filtered.map((q, idx) => ({ ...q, order_index: idx + 1 })));
+  };
+
+  // Move Question Up / Down
+  const handleMoveQuestion = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= questions.length) return;
+    const updated = [...questions];
+    const temp = updated[index];
+    updated[index] = updated[targetIndex];
+    updated[targetIndex] = temp;
+    setQuestions(updated.map((q, idx) => ({ ...q, order_index: idx + 1 })));
   };
 
   // Update Question Field
@@ -148,6 +160,23 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
     if (!updated[qIndex].choices.some((c) => c.is_correct)) {
       updated[qIndex].choices[0].is_correct = true;
     }
+    setQuestions(updated);
+  };
+
+  // Move Choice Up / Down
+  const handleMoveChoice = (qIndex: number, cIndex: number, direction: 'up' | 'down') => {
+    const choices = questions[qIndex].choices;
+    const targetIndex = direction === 'up' ? cIndex - 1 : cIndex + 1;
+    if (targetIndex < 0 || targetIndex >= choices.length) return;
+    const updated = [...questions];
+    const updatedChoices = [...choices];
+    const temp = updatedChoices[cIndex];
+    updatedChoices[cIndex] = updatedChoices[targetIndex];
+    updatedChoices[targetIndex] = temp;
+    updated[qIndex] = {
+      ...updated[qIndex],
+      choices: updatedChoices,
+    };
     setQuestions(updated);
   };
 
@@ -357,9 +386,33 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
             {questions.map((q, qIndex) => (
               <div key={q.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-bold text-axis-blue uppercase tracking-wider">
-                    Question #{qIndex + 1}
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    {questions.length > 1 && (
+                      <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+                        <button
+                          type="button"
+                          disabled={qIndex === 0}
+                          onClick={() => handleMoveQuestion(qIndex, 'up')}
+                          className="p-1 text-slate-500 hover:text-axis-blue hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed rounded transition-colors cursor-pointer"
+                          title="Move question up"
+                        >
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={qIndex === questions.length - 1}
+                          onClick={() => handleMoveQuestion(qIndex, 'down')}
+                          className="p-1 text-slate-500 hover:text-axis-blue hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed rounded transition-colors cursor-pointer"
+                          title="Move question down"
+                        >
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    <span className="text-xs font-bold text-axis-blue uppercase tracking-wider">
+                      Question #{qIndex + 1}
+                    </span>
+                  </div>
                   <div className="flex items-center space-x-3">
                     <select
                       className="bg-white border border-slate-200 text-slate-700 text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-axis-blue"
@@ -387,7 +440,7 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
                       <button
                         type="button"
                         onClick={() => handleRemoveQuestion(qIndex)}
-                        className="text-slate-400 hover:text-red-500 transition-colors"
+                        className="text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -475,13 +528,37 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
 
                   {q.choices.map((choice, cIndex) => (
                     <div key={choice.id} className="flex items-center space-x-2">
+                      {/* Reorder choice arrows */}
+                      {q.choices.length > 1 && (
+                        <div className="flex items-center bg-white border border-slate-200 rounded p-0.5 shadow-2xs flex-shrink-0">
+                          <button
+                            type="button"
+                            disabled={cIndex === 0}
+                            onClick={() => handleMoveChoice(qIndex, cIndex, 'up')}
+                            className="p-0.5 text-slate-400 hover:text-axis-blue hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed rounded transition-colors cursor-pointer"
+                            title="Move choice up"
+                          >
+                            <ChevronUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={cIndex === q.choices.length - 1}
+                            onClick={() => handleMoveChoice(qIndex, cIndex, 'down')}
+                            className="p-0.5 text-slate-400 hover:text-axis-blue hover:bg-slate-100 disabled:opacity-25 disabled:cursor-not-allowed rounded transition-colors cursor-pointer"
+                            title="Move choice down"
+                          >
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+
                       {q.question_type !== 'short_answer' && (
                         <input
                           type="radio"
                           name={`correct_${q.id}`}
                           checked={choice.is_correct}
                           onChange={() => handleSetCorrectChoice(qIndex, cIndex)}
-                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer flex-shrink-0"
                           title="Mark as correct answer"
                         />
                       )}
