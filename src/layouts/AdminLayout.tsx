@@ -45,8 +45,8 @@ export const AdminLayout: React.FC<{
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex">
-      {/* Prototype Sticky Sidebar (260px, Dark Navy) */}
-      <aside className="w-64 bg-[#0B1120] text-slate-200 p-5 flex flex-col justify-between sticky top-0 h-screen border-r border-slate-800/80 z-30 flex-shrink-0 hidden md:flex">
+      {/* Prototype Sticky Sidebar (260px, Deep Dark Blue Gradient) */}
+      <aside className="w-64 bg-gradient-to-b from-[#070D1C] via-[#0A224D] to-[#0E3875] text-slate-200 p-5 flex flex-col justify-between sticky top-0 h-screen border-r border-[#0E3875]/60 z-30 flex-shrink-0 hidden md:flex">
         <div className="space-y-6">
           {/* Brand Header */}
           <Link to="/admin" className="flex items-center space-x-3 px-1 group">
@@ -75,8 +75,8 @@ export const AdminLayout: React.FC<{
                 to="/admin"
                 className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                   location.pathname === '/admin'
-                    ? 'bg-slate-800/90 text-white shadow-sm border-l-4 border-cyan-400 pl-2'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+                    ? 'bg-white/10 text-white shadow-sm border-l-4 border-cyan-400 pl-2 backdrop-blur-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-white/5'
                 }`}
               >
                 <Layers className="w-4 h-4 text-cyan-400" />
@@ -87,10 +87,10 @@ export const AdminLayout: React.FC<{
         </div>
 
         {/* Prototype Sidebar Footer */}
-        <div className="pt-4 border-t border-slate-800/80 text-xs text-slate-400 space-y-2">
+        <div className="pt-4 border-t border-white/10 text-xs text-slate-400 space-y-2">
           <div>
             <span className="font-bold text-white block">AXIS Assessment Engine</span>
-            <span className="text-[11px] text-slate-400">Server-Authoritative Proctoring</span>
+            <span className="text-[11px] text-slate-300">Server-Authoritative Proctoring</span>
           </div>
           <div className="pt-1">
             <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold uppercase tracking-wider">
