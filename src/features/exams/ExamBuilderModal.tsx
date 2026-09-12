@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { QuestionType } from '@/types';
 import { serializeExamConfig } from '@/lib/examConfig';
 import { serializeQuestionContent, compressImageFile } from '@/lib/utils';
+import { MathText } from '@/components/ui/MathText';
 
 interface QuestionDraft {
   id: string;
@@ -395,11 +396,24 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
                 </div>
 
                 <Input
-                  placeholder="Enter the question text here..."
+                  placeholder="Enter the question text here (LaTeX supported, e.g. $\sigma(x) = \frac{1}{1 + e^{-x}}$)..."
                   value={q.question_text}
                   onChange={(e) => handleUpdateQuestion(qIndex, 'question_text', e.target.value)}
                   required
                 />
+
+                {/* Live Formula / LaTeX Preview for Question Text */}
+                {Boolean(q.question_text && (q.question_text.includes('$') || q.question_text.includes('\\'))) && (
+                  <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200/70 text-xs space-y-1">
+                    <div className="text-[10px] uppercase font-bold tracking-wider text-blue-700 flex items-center space-x-1">
+                      <Sparkles className="w-3 h-3 text-blue-600" />
+                      <span>Live Formula Preview</span>
+                    </div>
+                    <div className="text-slate-900 font-medium leading-relaxed">
+                      <MathText content={q.question_text} />
+                    </div>
+                  </div>
+                )}
 
                 {/* Optional Question Image / Diagram */}
                 <div className="space-y-2">
@@ -479,6 +493,11 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
                         className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-axis-blue"
                         required
                       />
+                      {Boolean(choice.choice_text && (choice.choice_text.includes('$') || choice.choice_text.includes('\\'))) && (
+                        <span className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-xs text-blue-900 flex-shrink-0 max-w-[200px] truncate" title="Formula Preview">
+                          <MathText content={choice.choice_text} />
+                        </span>
+                      )}
                       {choice.is_correct && (
                         <span className="text-[11px] text-emerald-700 font-bold px-2 py-0.5 bg-emerald-50 rounded border border-emerald-200">
                           Correct

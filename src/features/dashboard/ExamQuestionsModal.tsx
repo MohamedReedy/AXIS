@@ -5,6 +5,7 @@ import { Question } from '@/types';
 import { Modal } from '@/components/ui/modal';
 import { Badge } from '@/components/ui/badge';
 import { parseQuestionContent } from '@/lib/utils';
+import { MathText } from '@/components/ui/MathText';
 
 interface ExamQuestionsModalProps {
   isOpen: boolean;
@@ -105,7 +106,7 @@ export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
                   return (
                     <div className="space-y-2">
                       <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
-                        {cleanText}
+                        <MathText content={cleanText} />
                       </h4>
                       {effectiveImage && (
                         <div className="inline-block border border-slate-200 rounded-lg p-1 bg-white shadow-2xs">
@@ -138,7 +139,9 @@ export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
                           }`}>
                             {choice.is_correct ? '✓' : '•'}
                           </span>
-                          <span className="truncate">{choice.choice_text}</span>
+                          <span className="truncate">
+                            <MathText content={choice.choice_text} />
+                          </span>
                         </div>
                         {choice.is_correct && (
                           <span className="text-[10px] uppercase font-bold text-emerald-700 px-2 py-0.5 rounded bg-emerald-100 border border-emerald-300">

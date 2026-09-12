@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { formatDate, formatTimeRemaining, getExamSlug, parseQuestionContent } from '@/lib/utils';
 import { parseExamConfig } from '@/lib/examConfig';
+import { MathText } from '@/components/ui/MathText';
 
 type ExamStep = 'lobby' | 'rules' | 'taking' | 'completed' | 'disqualified' | 'expired';
 
@@ -897,7 +898,7 @@ export const StudentExamFlow: React.FC = () => {
                   return (
                     <div className="space-y-3 pt-2 select-none">
                       <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed">
-                        {cleanText}
+                        <MathText content={cleanText} />
                       </h3>
                       {effectiveImage && (
                         <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 inline-block max-w-full">
@@ -941,7 +942,7 @@ export const StudentExamFlow: React.FC = () => {
                             className="w-4 h-4 text-axis-blue focus:ring-axis-blue border-slate-300 cursor-pointer"
                           />
                           <span className="text-sm font-medium text-slate-800 select-none">
-                            {choice.choice_text}
+                            <MathText content={choice.choice_text} />
                           </span>
                         </label>
                       );
