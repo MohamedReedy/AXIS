@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   Send,
   Lock,
+  UserCheck,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { supabase } from '@/lib/supabase';
@@ -55,8 +56,11 @@ export const StudentExamFlow: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState<boolean>(false);
+  const [isRestoredSession, setIsRestoredSession] = useState<boolean>(false);
   const [windowState, setWindowState] = useState<'early' | 'open' | 'closed'>('open');
   const [timeUntilStart, setTimeUntilStart] = useState<number>(0);
+
+  const examConfig = parseExamConfig(exam?.instructions);
 
   // Update last saved relative time string
   useEffect(() => {
@@ -148,6 +152,77 @@ export const StudentExamFlow: React.FC = () => {
           setWindowState('closed');
         } else {
           setWindowState('open');
+
+          // Check for active in-progress session to recover seamlessly upon browser refresh
+          const sessionKey = `axis_session_${examObj.id}`;
+          const savedSessionRaw = localStorage.getItem(sessionKey);
+          if (savedSessionRaw) {
+            try {
+              const session = JSON.parse(savedSessionRaw);
+              if (session?.attemptId && session?.studentEmail) {
+                const { data: attData } = await supabase
+                  .from('exam_attempts')
+                  .select('id, status, deadline_at, strike_count, student_name, student_email, student_code')
+                  .eq('id', session.attemptId)
+                  .maybeSingle();
+
+                if (attData && attData.status === 'in_progress' && new Date(attData.deadline_at) > new Date()) {
+                  setAttemptId(attData.id);
+                  setStudentName(attData.student_name);
+                  setStudentEmail(attData.student_email);
+                  setStudentCode(attData.student_code || '');
+                  setDeadlineAt(new Date(attData.deadline_at));
+                  setStrikes(attData.strike_count || 0);
+
+                  // Fetch questions
+                  const { data: qData } = await supabase
+                    .from('questions')
+                    .select(`
+                      id,
+                      exam_id,
+                      order_index,
+                      question_text,
+                      question_type,
+                      points,
+                      created_at,
+                      choices:question_choices(id, question_id, order_index, choice_text)
+                    `)
+                    .eq('exam_id', examObj.id)
+                    .order('order_index');
+
+                  if (qData && qData.length > 0) {
+                    setQuestions(qData as Question[]);
+                  }
+
+                  // Fetch saved answers
+                  const { data: existingAnswers } = await supabase
+                    .from('answers')
+                    .select('question_id, selected_choice_id, text_answer')
+                    .eq('attempt_id', attData.id);
+
+                  if (existingAnswers && existingAnswers.length > 0) {
+                    const answersMap: Record<string, { choiceId?: string; textAnswer?: string }> = {};
+                    existingAnswers.forEach((ans: any) => {
+                      answersMap[ans.question_id] = {
+                        choiceId: ans.selected_choice_id || undefined,
+                        textAnswer: ans.text_answer || undefined,
+                      };
+                    });
+                    setStudentAnswers(answersMap);
+                    setLastSavedText('Answers recovered from server');
+                  }
+
+                  setStep('taking');
+                  setIsRestoredSession(true);
+                } else {
+                  localStorage.removeItem(sessionKey);
+                }
+              }
+            } catch (e) {
+              console.error('Session recovery failed:', e);
+              localStorage.removeItem(sessionKey);
+            }
+          }
         }
       } catch (err: any) {
         console.error('Failed to load exam:', err);
@@ -236,6 +311,9 @@ export const StudentExamFlow: React.FC = () => {
 
   // Disqualification callback
   const handleDisqualification = () => {
+    if (exam?.id) {
+      localStorage.removeItem(`axis_session_${exam.id}`);
+    }
     setStep('disqualified');
   };
 
@@ -257,7 +335,33 @@ export const StudentExamFlow: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // 1. Call start_exam RPC
+      // 1. Check client/server attempt limits if configured in template
+      const examConfig = parseExamConfig(exam.instructions);
+      if (examConfig.maxAttemptsPerStudent > 0) {
+        const { data: pastAttempts } = await supabase
+          .from('exam_attempts')
+          .select('id, status, deadline_at')
+          .eq('exam_id', exam.id)
+          .ilike('student_email', studentEmail.trim().toLowerCase());
+
+        if (pastAttempts && pastAttempts.length > 0) {
+          const completedAttempts = pastAttempts.filter(
+            (a) =>
+              a.status === 'submitted' ||
+              a.status === 'disqualified' ||
+              a.status === 'expired' ||
+              (a.status === 'in_progress' && new Date(a.deadline_at) < new Date())
+          );
+
+          if (completedAttempts.length >= examConfig.maxAttemptsPerStudent) {
+            throw new Error(
+              `Maximum attempts reached (${completedAttempts.length} of ${examConfig.maxAttemptsPerStudent}). You have already completed this examination.`
+            );
+          }
+        }
+      }
+
+      // 2. Call start_exam RPC
       const { data, error: rpcErr } = await supabase.rpc('start_exam', {
         p_exam_id: exam.id,
         p_student_name: studentName,
@@ -280,7 +384,15 @@ export const StudentExamFlow: React.FC = () => {
       setAttemptId(currentAttemptId);
       setDeadlineAt(deadlineDate);
 
-      // 2. Load Questions for this exam (Choices without exposing is_correct)
+      // Save active session for instant refresh recovery
+      localStorage.setItem(`axis_session_${exam.id}`, JSON.stringify({
+        attemptId: currentAttemptId,
+        studentName: studentName.trim(),
+        studentEmail: studentEmail.trim().toLowerCase(),
+        studentCode: studentCode ? studentCode.trim() : null,
+      }));
+
+      // 3. Load Questions for this exam (Choices without exposing is_correct)
       const { data: qData, error: qErr } = await supabase
         .from('questions')
         .select(`
@@ -299,6 +411,25 @@ export const StudentExamFlow: React.FC = () => {
       if (qErr) throw qErr;
 
       setQuestions(qData as Question[]);
+
+      // 4. Also fetch any previously saved answers (e.g. if reconnecting to active attempt)
+      const { data: savedAnswers } = await supabase
+        .from('answers')
+        .select('question_id, selected_choice_id, text_answer')
+        .eq('attempt_id', currentAttemptId);
+
+      if (savedAnswers && savedAnswers.length > 0) {
+        const ansMap: Record<string, { choiceId?: string; textAnswer?: string }> = {};
+        savedAnswers.forEach((a: any) => {
+          ansMap[a.question_id] = {
+            choiceId: a.selected_choice_id || undefined,
+            textAnswer: a.text_answer || undefined,
+          };
+        });
+        setStudentAnswers(ansMap);
+        setLastSavedText('Answers recovered from server');
+      }
+
       setStep('rules');
     } catch (err: any) {
       console.error('Failed to start attempt:', err);
@@ -399,9 +530,16 @@ export const StudentExamFlow: React.FC = () => {
         origin: { y: 0.6 },
       });
 
+      if (exam?.id) {
+        localStorage.removeItem(`axis_session_${exam.id}`);
+      }
+
       setStep(reason === 'expired' ? 'expired' : 'completed');
     } catch (err: any) {
       console.error('Submission error:', err);
+      if (exam?.id) {
+        localStorage.removeItem(`axis_session_${exam.id}`);
+      }
       setStep('completed');
     } finally {
       setIsSubmitting(false);
@@ -505,14 +643,24 @@ export const StudentExamFlow: React.FC = () => {
             <p className="text-xs text-slate-500 leading-relaxed">{exam?.description || 'Please enter your candidate credentials to access this assessment.'}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 py-3 border-y border-slate-100 text-xs">
-            <div className="flex items-center space-x-2 text-slate-700 font-medium">
+          <div className="grid grid-cols-3 gap-2 py-3 border-y border-slate-100 text-xs">
+            <div className="flex items-center space-x-1.5 text-slate-700 font-medium">
               <Clock className="w-3.5 h-3.5 text-axis-blue flex-shrink-0" />
-              <span>{exam?.duration_minutes} Mins Duration</span>
+              <span>{exam?.duration_minutes} Mins</span>
             </div>
-            <div className="flex items-center space-x-2 text-slate-700 font-medium">
+            <div className="flex items-center space-x-1.5 text-slate-700 font-medium">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-              <span>Max {exam?.max_strikes} Violations</span>
+              <span>Max {exam?.max_strikes} Strikes</span>
+            </div>
+            <div className="flex items-center space-x-1.5 text-slate-700 font-medium">
+              <UserCheck className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
+              <span>
+                {examConfig.maxAttemptsPerStudent === 0
+                  ? 'Unlimited'
+                  : examConfig.maxAttemptsPerStudent === 1
+                  ? '1 Attempt'
+                  : `${examConfig.maxAttemptsPerStudent} Attempts`}
+              </span>
             </div>
           </div>
 
@@ -692,6 +840,23 @@ export const StudentExamFlow: React.FC = () => {
             </div>
           </div>
 
+          {isRestoredSession && (
+            <div className="mb-4 p-3.5 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between text-xs text-blue-900 shadow-xs animate-in fade-in">
+              <div className="flex items-center space-x-2.5">
+                <CheckCircle2 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                <span>
+                  <strong>Active Session Restored:</strong> Your exam progress and server timer were recovered seamlessly. Ensure full-screen lockdown is active.
+                </span>
+              </div>
+              <button
+                onClick={() => setIsRestoredSession(false)}
+                className="text-blue-700 hover:text-blue-900 font-bold ml-3 text-xs flex-shrink-0 underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           <div className="split-axis items-start">
             {/* Left Column: Question Card */}
             {currentQ && (
@@ -823,7 +988,11 @@ export const StudentExamFlow: React.FC = () => {
                 <h3 className="text-sm font-bold text-slate-900 pb-2 border-b border-slate-100">Attempt state</h3>
                 <div className="kv-axis">
                   <b>Attempt</b>
-                  <span className="font-semibold text-slate-800">1 of 1</span>
+                  <span className="font-semibold text-slate-800">
+                    {examConfig.maxAttemptsPerStudent === 0
+                      ? 'Practice (Unlimited)'
+                      : `1 of ${examConfig.maxAttemptsPerStudent}`}
+                  </span>
                   
                   <b>Form</b>
                   <span className="text-slate-700">Form A • version locked</span>

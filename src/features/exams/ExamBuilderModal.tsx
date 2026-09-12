@@ -40,6 +40,7 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
   const [endTime, setEndTime] = useState(tomorrow);
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [maxStrikes, setMaxStrikes] = useState(3);
+  const [maxAttempts, setMaxAttempts] = useState<number>(1);
   const [status, setStatus] = useState<'draft' | 'published'>('published');
   const [showScoreToStudent, setShowScoreToStudent] = useState<boolean>(true);
 
@@ -177,7 +178,7 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
       await onSave({
         title,
         description,
-        instructions: serializeExamConfig(instructions, showScoreToStudent),
+        instructions: serializeExamConfig(instructions, showScoreToStudent, maxAttempts),
         start_time: new Date(startTime).toISOString(),
         end_time: new Date(endTime).toISOString(),
         duration_minutes: Number(durationMinutes),
@@ -281,6 +282,26 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
               helperText="Exceeding this strike count auto-disqualifies the student."
               required
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+              Max Attempts Per Student
+            </label>
+            <select
+              value={maxAttempts}
+              onChange={(e) => setMaxAttempts(Number(e.target.value))}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
+            >
+              <option value={1}>1 Attempt (Strict • High Stakes)</option>
+              <option value={2}>2 Attempts</option>
+              <option value={3}>3 Attempts</option>
+              <option value={5}>5 Attempts</option>
+              <option value={0}>Unlimited Practice Attempts</option>
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Limits how many times a candidate can take this exam using the same email.
+            </p>
           </div>
         </div>
 

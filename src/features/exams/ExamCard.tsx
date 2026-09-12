@@ -13,11 +13,13 @@ import {
   Archive,
   Trash2,
   Edit3,
+  UserCheck,
 } from 'lucide-react';
 import { Exam } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatDate, getExamSlug } from '@/lib/utils';
+import { parseExamConfig } from '@/lib/examConfig';
 import { ExamQuestionsModal } from '../dashboard/ExamQuestionsModal';
 import { EditScheduleModal } from '../dashboard/EditScheduleModal';
 
@@ -57,6 +59,8 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
     }
   };
 
+  const examConfig = parseExamConfig(exam.instructions);
+
   return (
     <div className="bg-white border border-slate-200/90 hover:border-blue-300 rounded-2xl p-6 transition-all shadow-xs hover:shadow-md flex flex-col justify-between space-y-5">
       {/* Top Details */}
@@ -78,7 +82,7 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
         </div>
 
         {/* Schedule & Metadata Grid */}
-        <div className="grid grid-cols-2 gap-2.5 py-3 border-y border-slate-100 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 py-3 border-y border-slate-100 text-xs">
           <div className="flex items-center space-x-1.5 text-slate-600">
             <Clock className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
             <span>{exam.duration_minutes} mins duration</span>
@@ -87,7 +91,17 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
             <ShieldAlert className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
             <span>Max {exam.max_strikes} violations</span>
           </div>
-          <div className="flex items-center justify-between col-span-2 text-slate-600">
+          <div className="flex items-center space-x-1.5 text-slate-600">
+            <UserCheck className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
+            <span>
+              {examConfig.maxAttemptsPerStudent === 0
+                ? 'Unlimited attempts'
+                : examConfig.maxAttemptsPerStudent === 1
+                ? '1 attempt / student'
+                : `${examConfig.maxAttemptsPerStudent} attempts / student`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between col-span-2 sm:col-span-3 text-slate-600">
             <div className="flex items-center space-x-1.5 truncate">
               <Calendar className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
               <span className="truncate">

@@ -29,6 +29,7 @@ export interface Exam {
   end_time: string;
   duration_minutes: number;
   max_strikes: number;
+  max_attempts?: number;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
