@@ -21,7 +21,7 @@ import { useLockdown } from '@/features/lockdown/useLockdown';
 import { LockdownOverlay } from '@/components/lockdown/LockdownOverlay';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { formatDate, formatTimeRemaining, getExamSlug } from '@/lib/utils';
+import { formatDate, formatTimeRemaining, getExamSlug, parseQuestionContent } from '@/lib/utils';
 import { parseExamConfig } from '@/lib/examConfig';
 
 type ExamStep = 'lobby' | 'rules' | 'taking' | 'completed' | 'disqualified' | 'expired';
@@ -890,10 +890,27 @@ export const StudentExamFlow: React.FC = () => {
                   />
                 </div>
 
-                {/* Question Text */}
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed pt-2 select-none">
-                  {currentQ.question_text}
-                </h3>
+                {/* Question Text & Diagram */}
+                {(() => {
+                  const { text: cleanText, imageUrl } = parseQuestionContent(currentQ.question_text);
+                  const effectiveImage = currentQ.image_url || imageUrl;
+                  return (
+                    <div className="space-y-3 pt-2 select-none">
+                      <h3 className="text-base sm:text-lg font-bold text-slate-900 leading-relaxed">
+                        {cleanText}
+                      </h3>
+                      {effectiveImage && (
+                        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 p-2 inline-block max-w-full">
+                          <img
+                            src={effectiveImage}
+                            alt={`Diagram for question #${currentQuestionIndex + 1}`}
+                            className="max-h-72 sm:max-h-96 w-auto max-w-full rounded-lg object-contain mx-auto shadow-2xs"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Options List (.list-item-axis from prototype) */}
                 {currentQ.question_type === 'short_answer' ? (

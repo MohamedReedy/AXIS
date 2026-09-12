@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Question } from '@/types';
 import { Modal } from '@/components/ui/modal';
 import { Badge } from '@/components/ui/badge';
+import { parseQuestionContent } from '@/lib/utils';
 
 interface ExamQuestionsModalProps {
   isOpen: boolean;
@@ -98,9 +99,26 @@ export const ExamQuestionsModal: React.FC<ExamQuestionsModalProps> = ({
                   </span>
                 </div>
 
-                <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
-                  {q.question_text}
-                </h4>
+                {(() => {
+                  const { text: cleanText, imageUrl } = parseQuestionContent(q.question_text);
+                  const effectiveImage = q.image_url || imageUrl;
+                  return (
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-bold text-slate-900 leading-relaxed">
+                        {cleanText}
+                      </h4>
+                      {effectiveImage && (
+                        <div className="inline-block border border-slate-200 rounded-lg p-1 bg-white shadow-2xs">
+                          <img
+                            src={effectiveImage}
+                            alt="Question diagram"
+                            className="max-h-36 rounded-md object-contain"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Choices List */}
                 <div className="space-y-1.5 pt-1">

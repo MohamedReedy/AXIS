@@ -55,6 +55,7 @@ export interface Question {
   points: number;
   created_at: string;
   choices?: QuestionChoice[];
+  image_url?: string | null;
 }
 
 export interface ExamAttempt {

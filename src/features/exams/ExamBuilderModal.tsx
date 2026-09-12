@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff, Image as ImageIcon, X, Upload } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { QuestionType } from '@/types';
 import { serializeExamConfig } from '@/lib/examConfig';
+import { serializeQuestionContent, compressImageFile } from '@/lib/utils';
 
 interface QuestionDraft {
   id: string;
@@ -17,6 +18,7 @@ interface QuestionDraft {
     choice_text: string;
     is_correct: boolean;
   }>;
+  image_url?: string;
 }
 
 interface ExamBuilderModalProps {
@@ -186,7 +188,7 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
         status,
         questions: questions.map((q, idx) => ({
           order_index: idx + 1,
-          question_text: q.question_text,
+          question_text: serializeQuestionContent(q.question_text, q.image_url),
           question_type: q.question_type,
           points: q.points,
           choices: q.choices.map((c, cIdx) => ({
@@ -398,6 +400,58 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
                   onChange={(e) => handleUpdateQuestion(qIndex, 'question_text', e.target.value)}
                   required
                 />
+
+                {/* Optional Question Image / Diagram */}
+                <div className="space-y-2">
+                  {q.image_url ? (
+                    <div className="relative inline-block border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs p-1">
+                      <img
+                        src={q.image_url}
+                        alt={`Diagram for question #${qIndex + 1}`}
+                        className="max-h-48 max-w-full rounded-lg object-contain"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateQuestion(qIndex, 'image_url', '')}
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-sm transition-all cursor-pointer"
+                        title="Remove Photo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200 shadow-2xs transition-colors cursor-pointer">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Upload Photo / Diagram</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressed = await compressImageFile(file);
+                                handleUpdateQuestion(qIndex, 'image_url', compressed);
+                              } catch (err: any) {
+                                alert('Failed to read image: ' + err?.message);
+                              }
+                            }
+                          }}
+                        />
+                      </label>
+                      <span className="text-[11px] text-slate-400 font-medium">or</span>
+                      <input
+                        type="url"
+                        placeholder="Paste image URL (https://...)"
+                        value={q.image_url || ''}
+                        onChange={(e) => handleUpdateQuestion(qIndex, 'image_url', e.target.value)}
+                        className="flex-1 min-w-[200px] bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-axis-blue"
+                      />
+                    </div>
+                  )}
+                </div>
 
                 {/* Choices */}
                 <div className="space-y-2 pt-1 pl-1">
