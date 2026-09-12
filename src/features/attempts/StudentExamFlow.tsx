@@ -496,9 +496,9 @@ export const StudentExamFlow: React.FC = () => {
         <div className="max-w-md w-full bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6">
           <div className="text-center space-y-2">
             <img
-              src="/axis-logo.jpeg"
+              src="/axis-logo.png"
               alt="AXIS"
-              className="w-14 h-14 rounded-2xl mx-auto object-cover border border-slate-200 shadow-xs mb-2"
+              className="w-16 h-16 mx-auto object-contain mb-2"
             />
             <div className="eyebrow-axis">Examination Registration</div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">{exam?.title}</h1>
@@ -625,9 +625,9 @@ export const StudentExamFlow: React.FC = () => {
         <header className="h-16 px-6 bg-white border-b border-slate-200 flex items-center justify-between shadow-xs sticky top-0 z-30">
           <div className="flex items-center space-x-3.5">
             <img
-              src="/axis-logo.jpeg"
+              src="/axis-logo.png"
               alt="AXIS"
-              className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs"
+              className="w-8 h-8 object-contain"
             />
             <div className="leading-tight">
               <span className="font-black text-slate-900 text-sm tracking-tight block">

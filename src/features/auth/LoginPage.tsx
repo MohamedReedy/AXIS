@@ -62,14 +62,16 @@ export const LoginPage: React.FC = () => {
         <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#0052D4]/30 rounded-full blur-3xl pointer-events-none" />
 
         {/* Top brand header */}
-        <div className="relative z-10 flex items-center space-x-3.5">
-          <img
-            src="/axis-logo.jpeg"
-            alt="AXIS"
-            className="w-11 h-11 rounded-xl object-cover border border-white/20 shadow-md shadow-black/20"
-          />
+        <div className="relative z-10 flex items-center space-x-4">
+          <div className="w-13 h-13 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 p-2 flex items-center justify-center shadow-lg shadow-black/20">
+            <img
+              src="/axis-logo.png"
+              alt="AXIS"
+              className="w-full h-full object-contain filter drop-shadow"
+            />
+          </div>
           <div>
-            <span className="font-black text-lg tracking-tight block">AXIS</span>
+            <span className="font-black text-xl tracking-tight block text-white">AXIS</span>
             <span className="text-[11px] text-cyan-200 uppercase tracking-widest font-bold">
               AI Excellence Innovation Sprint
             </span>

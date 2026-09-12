@@ -7,9 +7,9 @@ export const StudentLayout: React.FC<{ children: React.ReactNode }> = ({ childre
       <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-xs">
         <div className="flex items-center space-x-3">
           <img
-            src="/axis-logo.jpeg"
+            src="/axis-logo.png"
             alt="AXIS"
-            className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs"
+            className="w-8 h-8 object-contain"
           />
           <div className="leading-tight">
             <span className="font-black text-slate-900 text-sm tracking-tight block">AXIS</span>

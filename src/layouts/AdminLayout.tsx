@@ -51,9 +51,9 @@ export const AdminLayout: React.FC<{
           {/* Brand Header */}
           <Link to="/admin" className="flex items-center space-x-3 px-1 group">
             <img
-              src="/axis-logo.jpeg"
+              src="/axis-logo.png"
               alt="AXIS"
-              className="w-10 h-10 rounded-xl object-contain bg-white p-0.5 shadow-md group-hover:scale-105 transition-transform"
+              className="w-10 h-10 object-contain shadow-md group-hover:scale-105 transition-transform"
             />
             <div className="flex flex-col">
               <span className="font-black text-lg text-white tracking-tight">AXIS</span>
@@ -105,7 +105,7 @@ export const AdminLayout: React.FC<{
         <header className="h-[72px] bg-white border-b border-slate-200 sticky top-0 z-20 px-4 sm:px-8 flex items-center justify-between shadow-xs">
           <div className="flex items-center space-x-3">
             <Link to="/admin" className="md:hidden flex items-center space-x-2 mr-2">
-              <img src="/axis-logo.jpeg" alt="AXIS" className="w-8 h-8 rounded-lg object-contain bg-white p-0.5 border" />
+              <img src="/axis-logo.png" alt="AXIS" className="w-8 h-8 object-contain" />
             </Link>
             <div>
               <h1 className="text-lg sm:text-xl font-bold text-slate-900 leading-none">
