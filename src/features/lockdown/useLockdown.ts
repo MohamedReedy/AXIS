@@ -49,18 +49,13 @@ export function useLockdown({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => !isFullscreenSupported() || !!getFullscreenElement());
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [warningCount, setWarningCount] = useState<number>(currentStrikes);
-  const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const [cursorWarning, setCursorWarning] = useState<string | null>(null);
-  const [isPrivacyShieldActive, setIsPrivacyShieldActive] = useState<boolean>(false);
 
-  const graceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastViolationTimeRef = useRef<number>(0);
   const isReportingRef = useRef<boolean>(false);
   const originalTitleRef = useRef<string>(document.title);
-  const departureTimeRef = useRef<number | null>(null);
-  const departureReasonRef = useRef<string>('');
-  const departureTypeRef = useRef<ViolationType>('tab_blur');
 
-  // Sync warning count when parent updates strikes
+  // Sync warning count whenever parent updates strikes
   useEffect(() => {
     setWarningCount(currentStrikes);
   }, [currentStrikes]);
@@ -86,23 +81,27 @@ export function useLockdown({
       setIsFullscreen(true);
       setWarningMessage(null);
       setCursorWarning(null);
-      setIsPrivacyShieldActive(false);
       document.title = originalTitleRef.current;
-      if (graceTimerRef.current) {
-        clearInterval(graceTimerRef.current);
-        graceTimerRef.current = null;
-        setGraceSeconds(null);
-      }
     }
   }, []);
 
-  // Trigger official violation reporting
+  // Trigger official violation reporting IMMEDIATELY on event
   const triggerViolation = useCallback(
     async (type: ViolationType, details: string) => {
-      if (!isActive || isReportingRef.current) return;
-      isReportingRef.current = true;
+      if (!isActive) return;
+
+      const now = Date.now();
+      // Debounce duplicate events firing within 1.2s (e.g. blur + visibilitychange from 1 tab switch)
+      if (now - lastViolationTimeRef.current < 1200) {
+        return;
+      }
+      lastViolationTimeRef.current = now;
+
+      playSecurityWarningSound();
+      document.title = '🚨 SECURITY VIOLATION!';
 
       try {
+        isReportingRef.current = true;
         const result = await onViolation(type, details);
         setWarningCount(result.strike_count);
 
@@ -111,57 +110,34 @@ export function useLockdown({
           onDisqualify();
         } else {
           setWarningMessage(
-            `SECURITY VIOLATION (${result.strike_count}/${maxStrikes}): ${details}. Return to examination immediately.`
+            `SECURITY VIOLATION (${result.strike_count}/${maxStrikes}): ${details}.`
           );
         }
       } catch (err) {
         console.error('Failed to report violation:', err);
       } finally {
-        setTimeout(() => {
-          isReportingRef.current = false;
-        }, 1200);
+        isReportingRef.current = false;
       }
     },
     [isActive, maxStrikes, onViolation, onDisqualify]
-  );
-
-  // Start warning grace countdown BEFORE taking punitive action (used for desktop fullscreen exits)
-  const startGraceWarning = useCallback(
-    (type: ViolationType, warningText: string, violationDetails: string) => {
-      if (!isActive) return;
-
-      playSecurityWarningSound();
-      setWarningMessage(warningText);
-      document.title = '🚨 RETURN TO EXAM NOW!';
-
-      const targetEndTime = Date.now() + 10000;
-      setGraceSeconds(10);
-
-      if (graceTimerRef.current) clearInterval(graceTimerRef.current);
-
-      graceTimerRef.current = setInterval(() => {
-        const remaining = Math.max(0, Math.ceil((targetEndTime - Date.now()) / 1000));
-        setGraceSeconds(remaining);
-
-        if (remaining <= 0) {
-          if (graceTimerRef.current) {
-            clearInterval(graceTimerRef.current);
-            graceTimerRef.current = null;
-          }
-          document.title = originalTitleRef.current;
-          triggerViolation(type, violationDetails);
-        }
-      }, 500);
-    },
-    [isActive, triggerViolation]
   );
 
   useEffect(() => {
     if (!isActive) return;
     originalTitleRef.current = document.title;
 
-    // Handle departure (window blur, tab hidden, pagehide)
-    const handleDeparture = (type: ViolationType, reason: string) => {
+    // 1. Fullscreen change listener
+    const handleFullscreenChange = () => {
+      const inFullscreen = !isFullscreenSupported() || !!getFullscreenElement();
+      setIsFullscreen(inFullscreen);
+
+      if (!inFullscreen && isFullscreenSupported()) {
+        triggerViolation('fullscreen_exit', 'Exited full-screen examination mode');
+      }
+    };
+
+    // 2. Window Blur (User switched apps, clicked VS Code / another window, or opened snipping tool)
+    const handleWindowBlur = () => {
       // Ignore blur if student is typing in an input/textarea and document is still visible
       if (
         document.activeElement &&
@@ -171,109 +147,40 @@ export function useLockdown({
         return;
       }
 
-      // Activate Privacy Shield immediately to mask exam content from OS screenshots / multitasking previews
-      setIsPrivacyShieldActive(true);
-
-      if (departureTimeRef.current === null) {
-        departureTimeRef.current = Date.now();
-        departureReasonRef.current = reason;
-        departureTypeRef.current = type;
-      }
-    };
-
-    // Handle return (window focus, tab visible)
-    const handleReturn = () => {
-      // Always remove privacy shield when candidate is actively back
-      setIsPrivacyShieldActive(false);
-      document.title = originalTitleRef.current;
-
-      if (departureTimeRef.current !== null) {
-        const awayMs = Date.now() - departureTimeRef.current;
-        const awaySeconds = Math.max(1, Math.round(awayMs / 1000));
-        const savedReason = departureReasonRef.current;
-        const savedType = departureTypeRef.current || 'tab_blur';
-
-        departureTimeRef.current = null;
-        departureReasonRef.current = '';
-
-        // If away for >= 1500ms (1.5s), this is an intentional app/tab switch -> STRIKE!
-        if (awayMs >= 1500) {
-          playSecurityWarningSound();
-          if (graceTimerRef.current) {
-            clearInterval(graceTimerRef.current);
-            graceTimerRef.current = null;
-          }
-          setGraceSeconds(null);
-
-          const fullReason = `${savedReason} (${awaySeconds}s away)`;
-          triggerViolation(savedType, fullReason);
-          return;
-        }
-      }
-
-      // If returning quickly or restoring fullscreen
-      if (!isFullscreenSupported() || !!getFullscreenElement()) {
-        if (graceTimerRef.current) {
-          clearInterval(graceTimerRef.current);
-          graceTimerRef.current = null;
-        }
-        setGraceSeconds(null);
-      }
-    };
-
-    // 1. Fullscreen change listener
-    const handleFullscreenChange = () => {
-      const inFullscreen = !isFullscreenSupported() || !!getFullscreenElement();
-      setIsFullscreen(inFullscreen);
-
-      if (!inFullscreen && isFullscreenSupported()) {
-        // User clicked Exit Full Screen on a device supporting fullscreen
-        startGraceWarning(
-          'fullscreen_exit',
-          '⚠️ SECURITY WARNING: You exited full-screen examination mode! Return to full-screen immediately. You have 10 seconds before a violation strike is recorded.',
-          'Exited full-screen and did not return within 10s grace period'
-        );
-      } else if (inFullscreen) {
-        handleReturn();
-      }
-    };
-
-    // 2. Window Blur (User clicked on another window, opened another app, or snipping tool)
-    const handleWindowBlur = () => {
-      handleDeparture(
+      triggerViolation(
         'window_switch',
         isMobileDevice()
           ? 'Switched mobile app or minimized examination'
-          : 'Switched away to another application or window'
+          : 'Navigated away to another window or application'
       );
     };
 
-    // 3. Window Focus (User returned to the exam window)
+    // 3. Window Focus
     const handleWindowFocus = () => {
-      handleReturn();
+      document.title = originalTitleRef.current;
     };
 
     // 4. Tab visibility change (minimized or switched tab / switched app)
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        handleDeparture(
+        triggerViolation(
           'tab_blur',
           isMobileDevice()
             ? 'Switched mobile app or minimized browser'
             : 'Switched browser tab or minimized window'
         );
       } else {
-        handleReturn();
+        document.title = originalTitleRef.current;
       }
     };
 
     // 5. Pagehide (Mobile app switch / screen lock / browser minimize on iOS & Android)
     const handlePageHide = () => {
-      handleDeparture(
+      triggerViolation(
         'window_switch',
         isMobileDevice()
-          ? 'Switched to another application or minimized browser'
-          : 'Switched application or minimized window'
+          ? 'Switched to another application or closed browser'
+          : 'Navigated away or minimized browser window'
       );
     };
 
@@ -292,24 +199,20 @@ export function useLockdown({
     // 7. Context menu (right-click / long-press context menu) prevention
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      playSecurityWarningSound();
       triggerViolation('context_menu', 'Right-click context menu is disabled during exam');
     };
 
     // 8. Copy / Paste / Cut prevention
     const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
-      playSecurityWarningSound();
       triggerViolation('copy_paste', 'Clipboard copy action is strictly prohibited');
     };
     const handlePaste = (e: ClipboardEvent) => {
       e.preventDefault();
-      playSecurityWarningSound();
       triggerViolation('copy_paste', 'Clipboard paste action is strictly prohibited');
     };
     const handleCut = (e: ClipboardEvent) => {
       e.preventDefault();
-      playSecurityWarningSound();
       triggerViolation('copy_paste', 'Clipboard cut action is strictly prohibited');
     };
 
@@ -321,7 +224,6 @@ export function useLockdown({
       if (e.key === 'PrintScreen' || e.keyCode === 44) {
         e.preventDefault();
         e.stopPropagation();
-        playSecurityWarningSound();
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText('⚠️ Screen capture is strictly prohibited during examination.').catch(() => {});
         }
@@ -333,7 +235,6 @@ export function useLockdown({
       if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
         e.preventDefault();
         e.stopPropagation();
-        playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', `Screenshot shortcut blocked (Cmd+Shift+${e.key})`);
         return;
       }
@@ -342,7 +243,6 @@ export function useLockdown({
       if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         e.stopPropagation();
-        playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', 'Screen snipping shortcut blocked (Win/Ctrl+Shift+S)');
         return;
       }
@@ -351,7 +251,6 @@ export function useLockdown({
       if (e.key === 'F12' || (isCtrlOrCmd && e.shiftKey && ['i', 'j', 'c'].includes(e.key.toLowerCase()))) {
         e.preventDefault();
         e.stopPropagation();
-        playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', 'Attempted to access Developer Tools');
         return;
       }
@@ -360,7 +259,6 @@ export function useLockdown({
       if (isCtrlOrCmd && ['c', 'v', 'x', 'u', 'p'].includes(e.key.toLowerCase())) {
         e.preventDefault();
         e.stopPropagation();
-        playSecurityWarningSound();
         triggerViolation('forbidden_shortcut', `Attempted forbidden shortcut (Cmd/Ctrl + ${e.key.toUpperCase()})`);
         return;
       }
@@ -368,19 +266,17 @@ export function useLockdown({
       // Alt+Tab interception hint
       if (e.altKey && e.key === 'Tab') {
         e.preventDefault();
-        playSecurityWarningSound();
         return;
       }
 
       // Escape key interception
       if (e.key === 'Escape') {
         e.preventDefault();
-        playSecurityWarningSound();
         return;
       }
     };
 
-    // 10. KeyUp for PrintScreen fallback (some Windows browsers only fire on keyup)
+    // 10. KeyUp for PrintScreen fallback
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'PrintScreen' || e.keyCode === 44) {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -446,19 +342,14 @@ export function useLockdown({
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('popstate', handlePopState);
 
-      if (graceTimerRef.current) {
-        clearInterval(graceTimerRef.current);
-      }
       document.title = originalTitleRef.current;
     };
-  }, [isActive, startGraceWarning, triggerViolation]);
+  }, [isActive, triggerViolation]);
 
   return {
     isFullscreen,
-    isPrivacyShieldActive,
     warningMessage,
     warningCount,
-    graceSeconds,
     cursorWarning,
     enterFullscreen,
     clearWarning: () => setWarningMessage(null),

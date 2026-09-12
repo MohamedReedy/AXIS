@@ -323,10 +323,8 @@ export const StudentExamFlow: React.FC = () => {
   // Anti-Cheat Lockdown Hook
   const {
     isFullscreen,
-    isPrivacyShieldActive,
     warningMessage,
     warningCount,
-    graceSeconds,
     cursorWarning,
     enterFullscreen,
     clearWarning,
@@ -771,36 +769,17 @@ export const StudentExamFlow: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-40 bg-slate-50 text-slate-900 flex flex-col lockdown-active">
-        {/* Anti-Cheat Overlay (pops up on violation or fullscreen exit) */}
+        {/* Anti-Cheat Overlay (pops up immediately on violation or fullscreen exit with strike already recorded) */}
         <LockdownOverlay
           isVisible={(!isFullscreen && isFullscreenSupported()) || !!warningMessage}
           warningCount={warningCount}
           maxStrikes={exam?.max_strikes || 3}
           message={warningMessage}
-          graceSeconds={graceSeconds}
           onReturnToFullscreen={async () => {
             await enterFullscreen();
             clearWarning();
           }}
         />
-
-        {/* Security Curtain: Instant Blackout Privacy Shield during focus-loss, window-blur, or app-switch */}
-        {isPrivacyShieldActive && (
-          <div className="fixed inset-0 z-[99999] bg-slate-950/98 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center select-none animate-in fade-in duration-100">
-            <div className="w-16 h-16 rounded-3xl bg-red-950/80 border-2 border-red-500/50 flex items-center justify-center text-red-400 mb-4 shadow-xl shadow-red-950/50 animate-pulse">
-              <ShieldAlert className="w-9 h-9" />
-            </div>
-            <div className="inline-block px-3.5 py-1 rounded-full bg-red-950/60 border border-red-800/60 text-red-400 text-[11px] font-mono font-black uppercase tracking-widest mb-3">
-              AXIS Security Shield Active
-            </div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Examination Content Protected
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-sm mt-2 leading-relaxed">
-              Window focus lost or screen capture detected. Return to the examination tab immediately. Navigating away is logged as an anti-cheat strike.
-            </p>
-          </div>
-        )}
 
         {/* Dynamic Forensic Candidate Watermark across the entire examination */}
         <ForensicWatermark
@@ -869,7 +848,7 @@ export const StudentExamFlow: React.FC = () => {
         {/* Exam Body - Section 6 Prototype Split Layout */}
         <main
           className={`flex-1 max-w-[1460px] w-full mx-auto p-4 sm:p-6 flex flex-col justify-between overflow-y-auto transition-all duration-150 ${
-            isPrivacyShieldActive ? 'filter blur-2xl opacity-0 pointer-events-none' : ''
+            warningMessage ? 'filter blur-2xl opacity-0 pointer-events-none' : ''
           }`}
         >
           {/* Breadcrumb strip */}

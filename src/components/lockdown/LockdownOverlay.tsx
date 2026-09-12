@@ -7,7 +7,6 @@ interface LockdownOverlayProps {
   warningCount: number;
   maxStrikes: number;
   message: string | null;
-  graceSeconds: number | null;
   onReturnToFullscreen: () => void;
 }
 
@@ -16,17 +15,16 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
   warningCount,
   maxStrikes,
   message,
-  graceSeconds,
   onReturnToFullscreen,
 }) => {
-  if (!isVisible && !graceSeconds) return null;
+  if (!isVisible) return null;
 
   const isCritical = warningCount >= maxStrikes;
   const isFsSupported = isFullscreenSupported();
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 sm:p-6 text-center animate-shake select-none">
-      <div className="max-w-lg w-full bg-white border-2 border-red-500 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-slate-950/40 flex flex-col items-center space-y-5">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0B1120]/95 backdrop-blur-2xl p-4 sm:p-6 text-center animate-shake select-none">
+      <div className="max-w-lg w-full bg-white border-2 border-red-500 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-slate-950/60 flex flex-col items-center space-y-5">
         
         {/* Animated Warning Icon */}
         <div className="relative">
@@ -37,11 +35,6 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
               <Siren className="w-10 h-10 sm:w-12 sm:h-12 text-red-600 animate-bounce" />
             )}
           </div>
-          {graceSeconds !== null && graceSeconds > 0 && !isCritical && (
-            <div className="absolute -bottom-2 -right-2 bg-red-600 text-white text-xs font-black px-2.5 py-1 rounded-full shadow-md border border-red-400">
-              {graceSeconds}s
-            </div>
-          )}
         </div>
 
         {/* Header & Status */}
@@ -61,41 +54,39 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
           </div>
 
           <span className="inline-block px-3.5 py-1 rounded-full bg-red-50 text-red-700 font-bold text-xs uppercase tracking-wider border border-red-200">
-            {graceSeconds !== null && !isCritical
-              ? `⚠️ Pre-Strike Warning: ${graceSeconds}s Grace Period`
-              : `Violation Strike ${warningCount} of ${maxStrikes}`}
+            {isCritical
+              ? `Maximum Strikes Exceeded (${warningCount}/${maxStrikes})`
+              : `Violation Strike ${warningCount} of ${maxStrikes} Recorded`}
           </span>
 
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
             {isCritical
               ? 'EXAM TERMINATED (DISQUALIFIED)'
-              : graceSeconds !== null
-              ? '⚠️ SECURITY ALERT: EXAM FOCUS LOST'
               : '🚨 SECURITY VIOLATION RECORDED'}
           </h2>
 
           <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-md mx-auto">
             {message ||
               (isFsSupported
-                ? 'You exited full-screen, clicked cancel, or switched to another window! Return immediately to avoid an official violation strike.'
-                : 'You switched away from the exam window or tab! Return immediately to avoid an official violation strike.')}
+                ? 'You navigated away, exited full-screen, or switched to another window! An official violation strike has been recorded.'
+                : 'You navigated away from the examination! An official violation strike has been recorded.')}
           </p>
         </div>
 
-        {/* Countdown Box */}
-        {graceSeconds !== null && graceSeconds > 0 && !isCritical && (
-          <div className="w-full bg-red-50 rounded-2xl p-4 text-xs text-red-900 border border-red-200 space-y-1 shadow-inner">
+        {/* Callout Notice */}
+        {!isCritical && (
+          <div className="w-full bg-red-50 rounded-2xl p-3.5 text-xs text-red-900 border border-red-200 space-y-1 shadow-inner">
             <div className="font-bold text-red-700 uppercase tracking-wider text-[11px] flex items-center justify-center space-x-1.5">
-              <AlertTriangle className="w-4 h-4 text-amber-600" />
-              <span>Warning: Action Will Be Taken In</span>
+              <AlertTriangle className="w-4 h-4 text-red-600" />
+              <span>Violation Logged to Server Authority</span>
             </div>
-            <div>
-              {isFsSupported ? 'Return to fullscreen in' : 'Return to examination in'}{' '}
-              <strong className="text-red-700 text-base font-mono font-black px-2 py-0.5 bg-red-100 rounded">
-                {graceSeconds}s
+            <p className="text-[11px] text-red-700">
+              This incident has been permanently recorded. You have{' '}
+              <strong className="font-mono font-bold text-red-800">
+                {Math.max(0, maxStrikes - warningCount)}
               </strong>{' '}
-              or an official strike will be recorded and you will be disqualified!
-            </div>
+              strike{Math.max(0, maxStrikes - warningCount) === 1 ? '' : 's'} remaining before automatic disqualification.
+            </p>
           </div>
         )}
 
@@ -106,13 +97,7 @@ export const LockdownOverlay: React.FC<LockdownOverlayProps> = ({
             className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-axis-blue to-blue-700 hover:from-blue-700 hover:to-blue-800 active:scale-[0.98] text-white font-bold py-3.5 px-6 rounded-2xl transition-all shadow-md shadow-blue-600/30 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer text-sm"
           >
             <Maximize2 className="w-4 h-4" />
-            <span>
-              {graceSeconds !== null
-                ? isFsSupported
-                  ? 'Return to Fullscreen & Resume Exam'
-                  : 'Resume Examination'
-                : 'Acknowledge Strike & Resume Examination'}
-            </span>
+            <span>Acknowledge Strike & Resume Examination</span>
           </button>
         ) : (
           <div className="p-3.5 bg-red-50 rounded-xl text-xs text-red-700 border border-red-200 font-medium">
