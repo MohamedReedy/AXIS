@@ -11,6 +11,8 @@ export const AdminHub: React.FC = () => {
   const [exams, setExams] = useState<Exam[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isBuilderOpen, setIsBuilderOpen] = useState<boolean>(false);
+  const [builderMode, setBuilderMode] = useState<'create' | 'edit' | 'copy'>('create');
+  const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'published' | 'draft' | 'archived'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -41,47 +43,172 @@ export const AdminHub: React.FC = () => {
     fetchExams();
   }, []);
 
-  const handleCreateExam = async (examData: any) => {
+  const handleOpenCreate = () => {
+    setSelectedExam(null);
+    setBuilderMode('create');
+    setIsBuilderOpen(true);
+  };
+
+  const handleOpenEdit = (exam: Exam) => {
+    setSelectedExam(exam);
+    setBuilderMode('edit');
+    setIsBuilderOpen(true);
+  };
+
+  const handleOpenCopy = (exam: Exam) => {
+    setSelectedExam(exam);
+    setBuilderMode('copy');
+    setIsBuilderOpen(true);
+  };
+
+  const handleSaveExam = async (examData: any, examId?: string) => {
     const { questions, ...examFields } = examData;
 
-    // 1. Insert Exam
-    const { data: createdExam, error: examError } = await supabase
-      .from('exams')
-      .insert([examFields])
-      .select()
-      .single();
+    if (examId) {
+      // 1. Update Exam record
+      const { error: examError } = await supabase
+        .from('exams')
+        .update({
+          title: examFields.title,
+          description: examFields.description,
+          instructions: examFields.instructions,
+          start_time: examFields.start_time,
+          end_time: examFields.end_time,
+          duration_minutes: examFields.duration_minutes,
+          max_strikes: examFields.max_strikes,
+          status: examFields.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', examId);
 
-    if (examError) throw examError;
+      if (examError) throw examError;
 
-    // 2. Insert Questions & Choices
-    for (const q of questions) {
-      const { data: createdQuestion, error: qError } = await supabase
+      // 2. Fetch existing questions to reconcile
+      const { data: existingDbQuestions } = await supabase
         .from('questions')
-        .insert([{
-          exam_id: createdExam.id,
-          order_index: q.order_index,
-          question_text: q.question_text,
-          question_type: q.question_type,
-          points: q.points,
-        }])
+        .select('id, choices:question_choices(id)')
+        .eq('exam_id', examId);
+
+      const existingQIds = new Set((existingDbQuestions || []).map((q) => q.id));
+      const keptQIds = new Set(questions.filter((q: any) => !q.id.startsWith('q_')).map((q: any) => q.id));
+
+      // Delete removed questions
+      const toDeleteQIds = [...existingQIds].filter((id) => !keptQIds.has(id));
+      if (toDeleteQIds.length > 0) {
+        await supabase.from('questions').delete().in('id', toDeleteQIds);
+      }
+
+      // Upsert / Insert questions & choices
+      for (const q of questions) {
+        let questionId = q.id;
+        const isNewQuestion = q.id.startsWith('q_');
+
+        if (isNewQuestion) {
+          const { data: newQ, error: nqErr } = await supabase
+            .from('questions')
+            .insert([{
+              exam_id: examId,
+              order_index: q.order_index,
+              question_text: q.question_text,
+              question_type: q.question_type,
+              points: q.points,
+            }])
+            .select()
+            .single();
+
+          if (nqErr) throw nqErr;
+          questionId = newQ.id;
+        } else {
+          const { error: uqErr } = await supabase
+            .from('questions')
+            .update({
+              order_index: q.order_index,
+              question_text: q.question_text,
+              question_type: q.question_type,
+              points: q.points,
+            })
+            .eq('id', q.id);
+
+          if (uqErr) throw uqErr;
+        }
+
+        // Handle choices for this question
+        if (q.choices && q.choices.length > 0) {
+          if (!isNewQuestion) {
+            const dbQ = (existingDbQuestions || []).find((dq) => dq.id === questionId);
+            const existingChoiceIds = new Set((dbQ?.choices || []).map((c: any) => c.id));
+            const keptChoiceIds = new Set(q.choices.filter((c: any) => !c.id.startsWith('c_')).map((c: any) => c.id));
+
+            const toDeleteChoiceIds = [...existingChoiceIds].filter((cid) => !keptChoiceIds.has(cid));
+            if (toDeleteChoiceIds.length > 0) {
+              await supabase.from('question_choices').delete().in('id', toDeleteChoiceIds);
+            }
+          }
+
+          for (const c of q.choices) {
+            const isNewChoice = c.id.startsWith('c_');
+            if (isNewChoice || isNewQuestion) {
+              await supabase
+                .from('question_choices')
+                .insert([{
+                  question_id: questionId,
+                  order_index: c.order_index,
+                  choice_text: c.choice_text,
+                  is_correct: c.is_correct,
+                }]);
+            } else {
+              await supabase
+                .from('question_choices')
+                .update({
+                  order_index: c.order_index,
+                  choice_text: c.choice_text,
+                  is_correct: c.is_correct,
+                })
+                .eq('id', c.id);
+            }
+          }
+        }
+      }
+    } else {
+      // 1. Insert Exam
+      const { data: createdExam, error: examError } = await supabase
+        .from('exams')
+        .insert([examFields])
         .select()
         .single();
 
-      if (qError) throw qError;
+      if (examError) throw examError;
 
-      if (q.choices && q.choices.length > 0) {
-        const choiceRows = q.choices.map((c: any) => ({
-          question_id: createdQuestion.id,
-          order_index: c.order_index,
-          choice_text: c.choice_text,
-          is_correct: c.is_correct,
-        }));
+      // 2. Insert Questions & Choices
+      for (const q of questions) {
+        const { data: createdQuestion, error: qError } = await supabase
+          .from('questions')
+          .insert([{
+            exam_id: createdExam.id,
+            order_index: q.order_index,
+            question_text: q.question_text,
+            question_type: q.question_type,
+            points: q.points,
+          }])
+          .select()
+          .single();
 
-        const { error: cError } = await supabase
-          .from('question_choices')
-          .insert(choiceRows);
+        if (qError) throw qError;
 
-        if (cError) throw cError;
+        if (q.choices && q.choices.length > 0) {
+          const choiceRows = q.choices.map((c: any) => ({
+            question_id: createdQuestion.id,
+            order_index: c.order_index,
+            choice_text: c.choice_text,
+            is_correct: c.is_correct,
+          }));
+
+          const { error: cError } = await supabase
+            .from('question_choices')
+            .insert(choiceRows);
+
+          if (cError) throw cError;
+        }
       }
     }
 
@@ -127,7 +254,7 @@ export const AdminHub: React.FC = () => {
   });
 
   return (
-    <AdminLayout onOpenCreate={() => setIsBuilderOpen(true)}>
+    <AdminLayout onOpenCreate={handleOpenCreate}>
       <div className="space-y-6">
         {/* Prototype Hero Banner */}
         <div className="hero-axis">
@@ -246,6 +373,8 @@ export const AdminHub: React.FC = () => {
                 onStatusChange={handleStatusChange}
                 onDelete={handleDelete}
                 onUpdated={fetchExams}
+                onEdit={handleOpenEdit}
+                onCopy={handleOpenCopy}
               />
             ))}
           </div>
@@ -262,7 +391,7 @@ export const AdminHub: React.FC = () => {
                   : 'Get started by creating your first scheduled locked examination.'}
               </p>
             </div>
-            <Button size="sm" onClick={() => setIsBuilderOpen(true)} className="mt-2 bg-blue-700 hover:bg-blue-600 text-white">
+            <Button size="sm" onClick={handleOpenCreate} className="mt-2 bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
               <PlusCircle className="w-4 h-4 mr-1.5" />
               <span>Create First Exam</span>
             </Button>
@@ -270,11 +399,16 @@ export const AdminHub: React.FC = () => {
         )}
       </div>
 
-      {/* Exam Builder Modal */}
+      {/* Exam Builder Modal (Create, Full Template Edit & Copy/Reference Template) */}
       <ExamBuilderModal
         isOpen={isBuilderOpen}
-        onClose={() => setIsBuilderOpen(false)}
-        onSave={handleCreateExam}
+        onClose={() => {
+          setIsBuilderOpen(false);
+          setSelectedExam(null);
+        }}
+        onSave={handleSaveExam}
+        initialExam={selectedExam}
+        mode={builderMode}
       />
     </AdminLayout>
   );

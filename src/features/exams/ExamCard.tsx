@@ -28,9 +28,18 @@ interface ExamCardProps {
   onStatusChange: (id: string, status: 'draft' | 'published' | 'archived') => void;
   onDelete: (id: string) => void;
   onUpdated?: () => void;
+  onEdit: (exam: Exam) => void;
+  onCopy: (exam: Exam) => void;
 }
 
-export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDelete, onUpdated }) => {
+export const ExamCard: React.FC<ExamCardProps> = ({
+  exam,
+  onStatusChange,
+  onDelete,
+  onUpdated,
+  onEdit,
+  onCopy,
+}) => {
   const [copied, setCopied] = useState(false);
   const [isQuestionsModalOpen, setIsQuestionsModalOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
@@ -162,7 +171,7 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
             variant="outline"
             size="sm"
             onClick={() => setIsQuestionsModalOpen(true)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50"
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
             title="View Questions & Answers"
           >
             <HelpCircle className="w-3.5 h-3.5 text-blue-600" />
@@ -173,21 +182,44 @@ export const ExamCard: React.FC<ExamCardProps> = ({ exam, onStatusChange, onDele
             variant="outline"
             size="sm"
             onClick={() => navigate(`/admin/exam/${exam.id}/grades`)}
-            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50"
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
             title="Question-by-Question Grade Sheet"
           >
             <Table className="w-3.5 h-3.5 text-emerald-600" />
             <span>Grades</span>
           </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onCopy(exam)}
+            className="flex-1 sm:flex-initial flex items-center justify-center space-x-1.5 text-slate-700 bg-white border-slate-200 hover:bg-slate-50 cursor-pointer"
+            title="Copy & duplicate this exam as a reference template"
+          >
+            <Copy className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Copy</span>
+          </Button>
         </div>
 
         <div className="flex items-center space-x-1 self-end sm:self-auto">
+          {/* Copy Icon Button */}
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setIsScheduleModalOpen(true)}
-            title="Edit Schedule & Time"
-            className="text-xs text-slate-500 hover:text-blue-700 p-1.5 hover:bg-blue-50"
+            onClick={() => onCopy(exam)}
+            title="Copy & duplicate as reference template"
+            className="text-xs text-slate-500 hover:text-indigo-700 p-1.5 hover:bg-indigo-50 cursor-pointer"
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </Button>
+
+          {/* Edit Template Icon Button - positioned strictly on the LEFT of the Archive/Publish icon */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onEdit(exam)}
+            title="Edit Full Exam Template (Questions, Answers & Settings)"
+            className="text-xs text-slate-500 hover:text-blue-700 p-1.5 hover:bg-blue-50 cursor-pointer"
           >
             <Edit3 className="w-3.5 h-3.5" />
           </Button>

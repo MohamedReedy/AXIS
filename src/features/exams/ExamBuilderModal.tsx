@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff, Image as ImageIcon, X, Upload, ChevronUp, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Trash2, CheckCircle2, AlertCircle, Sparkles, Eye, EyeOff, Image as ImageIcon, X, Upload, ChevronUp, ChevronDown, Loader2, Copy as CopyIcon, Edit3 } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { QuestionType } from '@/types';
-import { serializeExamConfig } from '@/lib/examConfig';
-import { serializeQuestionContent, compressImageFile } from '@/lib/utils';
+import { QuestionType, Exam } from '@/types';
+import { serializeExamConfig, parseExamConfig } from '@/lib/examConfig';
+import { serializeQuestionContent, parseQuestionContent, compressImageFile } from '@/lib/utils';
 import { MathText } from '@/components/ui/MathText';
+import { supabase } from '@/lib/supabase';
 
 interface QuestionDraft {
   id: string;
@@ -25,10 +26,18 @@ interface QuestionDraft {
 interface ExamBuilderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (examData: any) => Promise<void>;
+  onSave: (examData: any, examId?: string) => Promise<void>;
+  initialExam?: Exam | null;
+  mode?: 'create' | 'edit' | 'copy';
 }
 
-export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onClose, onSave }) => {
+export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({
+  isOpen,
+  onClose,
+  onSave,
+  initialExam,
+  mode = 'create',
+}) => {
   // Form State
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -44,7 +53,7 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [maxStrikes, setMaxStrikes] = useState(3);
   const [maxAttempts, setMaxAttempts] = useState<number>(1);
-  const [status, setStatus] = useState<'draft' | 'published'>('published');
+  const [status, setStatus] = useState<'draft' | 'published' | 'archived'>('published');
   const [showScoreToStudent, setShowScoreToStudent] = useState<boolean>(true);
 
   // Questions State
@@ -65,7 +74,127 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
   ]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Synchronize modal state on open, edit, or copy
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (initialExam && (mode === 'edit' || mode === 'copy')) {
+      const loadExamData = async () => {
+        setIsLoadingData(true);
+        setError(null);
+        try {
+          const config = parseExamConfig(initialExam.instructions);
+          setTitle(mode === 'copy' ? `Copy of ${initialExam.title}` : initialExam.title);
+          setDescription(initialExam.description || '');
+          setInstructions(config.instructionsText || 'Maintain full-screen focus. Exiting or switching tabs triggers cheating strikes.');
+          setShowScoreToStudent(config.showScoreToStudent);
+          setMaxAttempts(config.maxAttemptsPerStudent);
+          setDurationMinutes(initialExam.duration_minutes || 30);
+          setMaxStrikes(initialExam.max_strikes || 3);
+          setStatus(mode === 'copy' ? 'published' : initialExam.status);
+
+          if (mode === 'copy') {
+            const curNow = new Date();
+            const curStart = new Date(curNow.getTime() - curNow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            const curTomorrow = new Date(curNow.getTime() + 24 * 60 * 60 * 1000 - curNow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            setStartTime(curStart);
+            setEndTime(curTomorrow);
+          } else {
+            const dStart = new Date(initialExam.start_time);
+            const dEnd = new Date(initialExam.end_time);
+            setStartTime(new Date(dStart.getTime() - dStart.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+            setEndTime(new Date(dEnd.getTime() - dEnd.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+          }
+
+          // Fetch questions and choices for this exam
+          const { data: qData, error: qErr } = await supabase
+            .from('questions')
+            .select(`
+              id,
+              exam_id,
+              order_index,
+              question_text,
+              question_type,
+              points,
+              choices:question_choices(id, question_id, order_index, choice_text, is_correct)
+            `)
+            .eq('exam_id', initialExam.id)
+            .order('order_index');
+
+          if (qErr) throw qErr;
+
+          if (qData && qData.length > 0) {
+            const drafts: QuestionDraft[] = qData.map((q: any, qIdx: number) => {
+              const { text: cleanText, imageUrl } = parseQuestionContent(q.question_text);
+              const qId = mode === 'copy' ? `q_${Date.now()}_${qIdx}` : q.id;
+              const rawChoices = (q.choices || []).sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+              const choices = rawChoices.map((c: any, cIdx: number) => ({
+                id: mode === 'copy' ? `c_${Date.now()}_${qIdx}_${cIdx}` : c.id,
+                choice_text: c.choice_text,
+                is_correct: Boolean(c.is_correct),
+              }));
+
+              return {
+                id: qId,
+                order_index: qIdx + 1,
+                question_text: cleanText,
+                question_type: q.question_type as QuestionType,
+                points: Number(q.points) || 1,
+                image_url: imageUrl || '',
+                choices: choices.length > 0 ? choices : [
+                  { id: `c_${Date.now()}_1`, choice_text: 'Option A', is_correct: true },
+                  { id: `c_${Date.now()}_2`, choice_text: 'Option B', is_correct: false },
+                ],
+              };
+            });
+            setQuestions(drafts);
+          }
+        } catch (err: any) {
+          console.error('Failed to load exam details:', err);
+          setError('Failed to load exam details: ' + err?.message);
+        } finally {
+          setIsLoadingData(false);
+        }
+      };
+
+      loadExamData();
+    } else {
+      // Reset for fresh create
+      const curNow = new Date();
+      const curStart = new Date(curNow.getTime() - curNow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      const curTomorrow = new Date(curNow.getTime() + 24 * 60 * 60 * 1000 - curNow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      setTitle('');
+      setDescription('');
+      setInstructions('Maintain full-screen focus. Exiting or switching tabs triggers cheating strikes.');
+      setStartTime(curStart);
+      setEndTime(curTomorrow);
+      setDurationMinutes(30);
+      setMaxStrikes(3);
+      setMaxAttempts(1);
+      setStatus('published');
+      setShowScoreToStudent(true);
+      setQuestions([
+        {
+          id: 'q1',
+          order_index: 1,
+          question_text: 'What is the primary objective of browser-based lockdown in an exam?',
+          question_type: 'multiple_choice',
+          points: 1,
+          choices: [
+            { id: 'c1', choice_text: 'To prevent tab switching and unauthorized navigation', is_correct: true },
+            { id: 'c2', choice_text: 'To make the internet faster', is_correct: false },
+            { id: 'c3', choice_text: 'To turn off student monitors', is_correct: false },
+            { id: 'c4', choice_text: 'To shut down the computer', is_correct: false },
+          ],
+        },
+      ]);
+      setError(null);
+      setIsLoadingData(false);
+    }
+  }, [isOpen, initialExam, mode]);
 
   // Add Question
   const handleAddQuestion = () => {
@@ -217,17 +346,19 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
         max_strikes: Number(maxStrikes),
         status,
         questions: questions.map((q, idx) => ({
+          id: q.id,
           order_index: idx + 1,
           question_text: serializeQuestionContent(q.question_text, q.image_url),
           question_type: q.question_type,
           points: q.points,
           choices: q.choices.map((c, cIdx) => ({
+            id: c.id,
             order_index: cIdx + 1,
             choice_text: c.choice_text,
             is_correct: c.is_correct,
           })),
         })),
-      });
+      }, mode === 'edit' ? initialExam?.id : undefined);
       onClose();
     } catch (err: any) {
       setError(err?.message || 'Failed to save exam');
@@ -236,15 +367,43 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
     }
   };
 
+  const modalTitle = mode === 'edit'
+    ? `Edit Exam: ${initialExam?.title || 'Template'}`
+    : mode === 'copy'
+    ? `Copy & Reference: ${initialExam?.title || 'Template'}`
+    : 'Create New Examination';
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create New Examination" maxWidth="4xl">
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && (
-          <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center space-x-2 text-red-400 text-xs font-medium">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+    <Modal isOpen={isOpen} onClose={onClose} title={modalTitle} maxWidth="4xl">
+      {isLoadingData ? (
+        <div className="py-24 flex flex-col items-center justify-center space-y-3">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+          <p className="text-sm font-semibold text-slate-700">Loading exam template, questions & choices...</p>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {mode === 'copy' && (
+            <div className="p-3 rounded-xl bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-900 flex items-center space-x-2">
+              <CopyIcon className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+              <span>
+                <strong>Reference Template:</strong> Pre-filled from <em>{initialExam?.title}</em>. You can edit questions, reorder options, and add new questions.
+              </span>
+            </div>
+          )}
+          {mode === 'edit' && (
+            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200 text-xs text-blue-900 flex items-center space-x-2">
+              <Edit3 className="w-4 h-4 text-blue-600 flex-shrink-0" />
+              <span>
+                <strong>Full Template Editing:</strong> Modify any settings, existing questions, answers, points, diagrams, or add new questions.
+              </span>
+            </div>
+          )}
+          {error && (
+            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center space-x-2 text-red-400 text-xs font-medium">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
         {/* Basic Settings */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -611,14 +770,17 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
         {/* Footer Actions */}
         <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <label className="text-xs text-slate-600 font-semibold">Initial Status:</label>
+            <label className="text-xs text-slate-600 font-semibold">
+              {mode === 'edit' ? 'Exam Status:' : 'Initial Status:'}
+            </label>
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value as 'draft' | 'published')}
-              className="bg-white border border-slate-200 text-slate-800 text-xs rounded-lg px-3 py-1.5 focus:border-axis-blue"
+              onChange={(e) => setStatus(e.target.value as 'draft' | 'published' | 'archived')}
+              className="bg-white border border-slate-200 text-slate-800 text-xs rounded-lg px-3 py-1.5 focus:border-axis-blue cursor-pointer"
             >
-              <option value="published">Published (Ready for Students)</option>
-              <option value="draft">Draft (Save without publishing)</option>
+              <option value="published">Published (Active)</option>
+              <option value="draft">Draft (Unpublished)</option>
+              {mode === 'edit' && <option value="archived">Archived</option>}
             </select>
           </div>
 
@@ -626,12 +788,17 @@ export const ExamBuilderModal: React.FC<ExamBuilderModalProps> = ({ isOpen, onCl
             <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" isLoading={isSubmitting}>
-              Save & Create Exam
+            <Button type="submit" size="sm" isLoading={isSubmitting} className="bg-blue-700 hover:bg-blue-600 text-white">
+              {mode === 'edit'
+                ? 'Update Examination'
+                : mode === 'copy'
+                ? 'Create Copied Exam'
+                : 'Save & Create Exam'}
             </Button>
           </div>
         </div>
       </form>
+      )}
     </Modal>
   );
 };
