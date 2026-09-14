@@ -352,6 +352,7 @@ export function useLockdown({
     warningCount,
     cursorWarning,
     enterFullscreen,
+    triggerViolation,
     clearWarning: () => setWarningMessage(null),
   };
 }

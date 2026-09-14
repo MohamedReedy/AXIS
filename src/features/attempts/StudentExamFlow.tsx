@@ -327,6 +327,7 @@ export const StudentExamFlow: React.FC = () => {
     warningCount,
     cursorWarning,
     enterFullscreen,
+    triggerViolation,
     clearWarning,
   } = useLockdown({
     isActive: step === 'taking',
@@ -778,6 +779,12 @@ export const StudentExamFlow: React.FC = () => {
           onReturnToFullscreen={async () => {
             await enterFullscreen();
             clearWarning();
+          }}
+          onTimeout={async () => {
+            await triggerViolation(
+              'window_switch',
+              'Failed to return to examination screen within 10-second window (Consecutive Strike)'
+            );
           }}
         />
 
