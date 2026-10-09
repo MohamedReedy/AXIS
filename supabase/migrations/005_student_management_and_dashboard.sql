@@ -234,7 +234,6 @@ BEGIN
             'question_text', q.question_text,
             'question_type', q.question_type,
             'points', q.points,
-            'image_url', q.image_url,
             'choices', (
                 SELECT COALESCE(jsonb_agg(
                     jsonb_build_object(

@@ -12,6 +12,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   Filter,
+  Check,
+  Sparkles,
+  AlertCircle,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -19,7 +23,7 @@ import { StudentDashboardLayout } from '@/layouts/StudentDashboardLayout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MathText } from '@/components/ui/MathText';
-import { formatDate } from '@/lib/utils';
+import { formatDate, parseQuestionContent } from '@/lib/utils';
 import { StudentExamReviewData, StudentReviewQuestion } from '@/types';
 
 export const StudentExamReview: React.FC = () => {
@@ -31,7 +35,7 @@ export const StudentExamReview: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [isLocked, setIsLocked] = useState<boolean>(false);
-  const [filterType, setFilterType] = useState<'all' | 'correct' | 'incorrect'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'correct' | 'incorrect' | 'unanswered'>('all');
 
   const loadReviewData = async () => {
     if (!attemptId) return;
@@ -45,7 +49,13 @@ export const StudentExamReview: React.FC = () => {
         p_attempt_id: attemptId,
       });
 
-      if (!rpcErr && rpcData) {
+      if (!rpcErr && rpcData && rpcData.questions && rpcData.questions.length > 0) {
+        // Ensure choices are sorted by order_index
+        rpcData.questions.forEach((q: any) => {
+          if (q.choices && Array.isArray(q.choices)) {
+            q.choices.sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+          }
+        });
         setData(rpcData as StudentExamReviewData);
       } else {
         // If error message indicates locked scheduled time
@@ -60,7 +70,7 @@ export const StudentExamReview: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to load review:', err);
-      setError(err?.message || 'Failed to load exam review');
+      await loadFallbackReviewData();
     } finally {
       setIsLoading(false);
     }
@@ -95,20 +105,24 @@ export const StudentExamReview: React.FC = () => {
         return;
       }
 
-      // 3. Fetch questions & choices
-      const { data: questions } = await supabase
+      // 3. Fetch questions with nested choices
+      const { data: questions, error: qErr } = await supabase
         .from('questions')
-        .select('*')
+        .select(`
+          id,
+          exam_id,
+          order_index,
+          question_text,
+          question_type,
+          points,
+          choices:question_choices(id, question_id, order_index, choice_text, is_correct)
+        `)
         .eq('exam_id', exam.id)
         .order('order_index');
 
-      // 4. Fetch choices
-      const { data: choices } = await supabase
-        .from('question_choices')
-        .select('*')
-        .order('order_index');
+      if (qErr) throw qErr;
 
-      // 5. Fetch student answers
+      // 4. Fetch student answers for this attempt
       const { data: answers } = await supabase
         .from('answers')
         .select('*')
@@ -119,22 +133,21 @@ export const StudentExamReview: React.FC = () => {
         answersMap[a.question_id] = a;
       });
 
-      const choicesMap: Record<string, any[]> = {};
-      choices?.forEach((c) => {
-        if (!choicesMap[c.question_id]) choicesMap[c.question_id] = [];
-        choicesMap[c.question_id].push(c);
-      });
+      const formattedQuestions: StudentReviewQuestion[] = (questions || []).map((q: any) => {
+        const sortedChoices = (q.choices || []).sort(
+          (a: any, b: any) => (a.order_index || 0) - (b.order_index || 0)
+        );
 
-      const formattedQuestions: StudentReviewQuestion[] = (questions || []).map((q) => ({
-        id: q.id,
-        order_index: q.order_index,
-        question_text: q.question_text,
-        question_type: q.question_type,
-        points: q.points,
-        image_url: q.image_url,
-        choices: choicesMap[q.id] || [],
-        student_answer: answersMap[q.id] || null,
-      }));
+        return {
+          id: q.id,
+          order_index: q.order_index,
+          question_text: q.question_text,
+          question_type: q.question_type,
+          points: q.points,
+          choices: sortedChoices,
+          student_answer: answersMap[q.id] || null,
+        };
+      });
 
       setData({
         attempt,
@@ -210,13 +223,26 @@ export const StudentExamReview: React.FC = () => {
 
   const { attempt, exam, questions } = data;
 
-  // Question counts
+  // Breakdown statistics
   const correctCount = questions.filter((q) => q.student_answer?.is_correct === true).length;
-  const incorrectCount = questions.filter((q) => q.student_answer?.is_correct === false).length;
+  const incorrectCount = questions.filter((q) => {
+    const ans = q.student_answer;
+    const hasAnswered = ans && (ans.selected_choice_id || (ans.text_answer && ans.text_answer.trim() !== ''));
+    return ans?.is_correct === false && hasAnswered;
+  }).length;
+  const unansweredCount = questions.filter((q) => {
+    const ans = q.student_answer;
+    return !ans || (!ans.selected_choice_id && (!ans.text_answer || ans.text_answer.trim() === ''));
+  }).length;
 
   const filteredQuestions = questions.filter((q) => {
-    if (filterType === 'correct') return q.student_answer?.is_correct === true;
-    if (filterType === 'incorrect') return q.student_answer?.is_correct === false;
+    const ans = q.student_answer;
+    const isCorrect = ans?.is_correct === true;
+    const hasAnswered = ans && (ans.selected_choice_id || (ans.text_answer && ans.text_answer.trim() !== ''));
+
+    if (filterType === 'correct') return isCorrect;
+    if (filterType === 'incorrect') return !isCorrect && hasAnswered;
+    if (filterType === 'unanswered') return !hasAnswered;
     return true;
   });
 
@@ -235,7 +261,7 @@ export const StudentExamReview: React.FC = () => {
         </div>
 
         {/* Hero Score Banner */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-xs">
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-2">
               <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold">
@@ -253,7 +279,7 @@ export const StudentExamReview: React.FC = () => {
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
                 <span className="flex items-center space-x-1.5">
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Submitted {attempt.submitted_at ? formatDate(attempt.submitted_at) : 'N/A'}</span>
+                  <span>Submitted: {attempt.submitted_at ? formatDate(attempt.submitted_at) : 'N/A'}</span>
                 </span>
                 <span className="flex items-center space-x-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
@@ -265,7 +291,7 @@ export const StudentExamReview: React.FC = () => {
             </div>
 
             {/* Score Highlight Box */}
-            <div className="flex items-center gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-100 flex-shrink-0">
+            <div className="flex items-center gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200/80 flex-shrink-0 shadow-xs">
               <div className="text-right">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Final Grade
@@ -301,79 +327,99 @@ export const StudentExamReview: React.FC = () => {
         </div>
 
         {/* Filter Navigation Bar */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-          <div className="flex items-center space-x-1.5 text-xs font-semibold">
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-1.5 text-xs font-semibold overflow-x-auto pb-1 sm:pb-0">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 filterType === 'all'
-                  ? 'bg-blue-50 text-blue-800 font-bold border border-blue-200'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-blue-50 text-blue-800 font-bold border border-blue-200 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
-              All Questions ({questions.length})
+              All Items ({questions.length})
             </button>
             <button
               onClick={() => setFilterType('correct')}
-              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 filterType === 'correct'
-                  ? 'bg-emerald-50 text-emerald-800 font-bold border border-emerald-200'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               Correct ({correctCount})
             </button>
             <button
               onClick={() => setFilterType('incorrect')}
-              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
                 filterType === 'incorrect'
-                  ? 'bg-rose-50 text-rose-800 font-bold border border-rose-200'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-rose-50 text-rose-800 font-bold border border-rose-200 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
               Incorrect ({incorrectCount})
             </button>
+            <button
+              onClick={() => setFilterType('unanswered')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                filterType === 'unanswered'
+                  ? 'bg-amber-50 text-amber-800 font-bold border border-amber-200 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              Unanswered ({unansweredCount})
+            </button>
           </div>
 
-          <span className="text-xs text-slate-400 font-medium hidden sm:inline">
-            Showing {filteredQuestions.length} of {questions.length} items
+          <span className="text-xs text-slate-400 font-medium text-right sm:text-left">
+            Showing {filteredQuestions.length} of {questions.length} questions
           </span>
         </div>
 
         {/* Questions Breakdown List */}
-        <div className="space-y-4">
-          {filteredQuestions.map((q, idx) => {
+        <div className="space-y-5">
+          {filteredQuestions.map((q) => {
             const isCorrect = q.student_answer?.is_correct === true;
             const pointsEarned = q.student_answer?.points_earned ?? 0;
             const selectedChoiceId = q.student_answer?.selected_choice_id;
+            const hasSubmittedAnswer =
+              q.student_answer &&
+              (q.student_answer.selected_choice_id ||
+                (q.student_answer.text_answer && q.student_answer.text_answer.trim() !== ''));
+
+            // Parse clean question text and embedded images (<!--IMAGE:...-->)
+            const { text: cleanPrompt, imageUrl: parsedImage } = parseQuestionContent(q.question_text);
+            const displayImage = q.image_url || parsedImage;
 
             return (
               <div
                 key={q.id}
-                className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4 transition-all"
+                className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 sm:p-7 space-y-5 transition-all hover:border-slate-300"
               >
                 {/* Question Header: Number, Points, Status Badge */}
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
                   <div className="flex items-center space-x-2.5">
-                    <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center">
+                    <span className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 font-black text-xs flex items-center justify-center border border-blue-100 shadow-xs">
                       {q.order_index}
                     </span>
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      {q.question_type === 'multiple_choice'
-                        ? 'Multiple Choice'
-                        : q.question_type === 'true_false'
-                        ? 'True / False'
-                        : 'Short Answer'}
-                    </span>
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block leading-none">
+                        {q.question_type === 'multiple_choice'
+                          ? 'Multiple Choice Question'
+                          : q.question_type === 'true_false'
+                          ? 'True / False Question'
+                          : 'Short Answer Question'}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="flex items-center space-x-2.5">
                     {/* Points Pill */}
                     <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ${
+                      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
                         isCorrect
                           ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                          : 'bg-rose-50 text-rose-800 border border-rose-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
                       }`}
                     >
                       {pointsEarned} / {q.points} pt{q.points !== 1 ? 's' : ''}
@@ -381,74 +427,83 @@ export const StudentExamReview: React.FC = () => {
 
                     {/* Result Badge */}
                     {isCorrect ? (
-                      <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+                      <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold shadow-xs">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                         <span>Correct</span>
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-bold">
+                    ) : hasSubmittedAnswer ? (
+                      <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-bold shadow-xs">
                         <XCircle className="w-3.5 h-3.5 text-rose-600" />
                         <span>Incorrect</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center space-x-1 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold shadow-xs">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Not Answered</span>
                       </span>
                     )}
                   </div>
                 </div>
 
                 {/* Question Prompt with KaTeX Math Rendering */}
-                <div className="text-sm font-semibold text-slate-900 leading-relaxed">
-                  <MathText content={q.question_text} />
+                <div className="text-sm sm:text-base font-semibold text-slate-900 leading-relaxed pl-0.5">
+                  <MathText content={cleanPrompt} />
                 </div>
 
                 {/* Attached Diagram / Image */}
-                {q.image_url && (
-                  <div className="p-2 border border-slate-200 rounded-xl bg-slate-50 max-w-md">
+                {displayImage && (
+                  <div className="p-3 border border-slate-200 rounded-2xl bg-slate-50/70 inline-block max-w-full">
                     <img
-                      src={q.image_url}
+                      src={displayImage}
                       alt={`Diagram for Question ${q.order_index}`}
-                      className="max-h-60 rounded-lg object-contain w-full"
+                      className="max-h-80 rounded-xl object-contain w-auto shadow-xs border border-slate-200"
                     />
                   </div>
                 )}
 
-                {/* Choices Breakdown for MC / True-False */}
-                {q.question_type !== 'short_answer' && q.choices && (
-                  <div className="space-y-2 pt-2">
+                {/* Choices Breakdown for Multiple Choice / True-False */}
+                {q.question_type !== 'short_answer' && q.choices && q.choices.length > 0 && (
+                  <div className="space-y-2.5 pt-2">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                      Answer Choices:
+                    </span>
+
                     {q.choices.map((choice, cIdx) => {
                       const letter = String.fromCharCode(65 + cIdx);
                       const isSelected = selectedChoiceId === choice.id;
                       const isChoiceCorrect = choice.is_correct === true;
 
-                      let choiceClass =
-                        'border-slate-200 bg-white text-slate-700 hover:border-slate-300';
-                      let badge = null;
+                      let containerStyle = 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50/60';
+                      let letterBadgeStyle = 'bg-slate-100 text-slate-700 font-bold border border-slate-200';
+                      let statusBadge = null;
 
                       if (isSelected && isChoiceCorrect) {
-                        // Correctly chosen
-                        choiceClass =
-                          'border-emerald-400 bg-emerald-50/70 text-emerald-950 font-medium ring-1 ring-emerald-400';
-                        badge = (
-                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>Your Answer (Correct)</span>
+                        // Student selected the correct answer
+                        containerStyle = 'border-emerald-500 bg-emerald-50/80 text-emerald-950 ring-2 ring-emerald-500/20 shadow-xs';
+                        letterBadgeStyle = 'bg-emerald-600 text-white font-bold';
+                        statusBadge = (
+                          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold shadow-xs flex-shrink-0">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Your Answer • Correct</span>
                           </span>
                         );
                       } else if (isSelected && !isChoiceCorrect) {
-                        // Incorrect choice by candidate
-                        choiceClass =
-                          'border-rose-400 bg-rose-50/70 text-rose-950 font-medium ring-1 ring-rose-400';
-                        badge = (
-                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-bold">
-                            <XCircle className="w-3 h-3 text-rose-600" />
-                            <span>Your Answer (Incorrect)</span>
+                        // Student selected wrong answer
+                        containerStyle = 'border-rose-400 bg-rose-50/80 text-rose-950 ring-2 ring-rose-400/20 shadow-xs';
+                        letterBadgeStyle = 'bg-rose-600 text-white font-bold';
+                        statusBadge = (
+                          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-rose-600 text-white text-[11px] font-bold shadow-xs flex-shrink-0">
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Your Answer • Incorrect</span>
                           </span>
                         );
                       } else if (!isSelected && isChoiceCorrect) {
-                        // The correct answer that student missed
-                        choiceClass =
-                          'border-emerald-300 bg-emerald-50/30 text-emerald-900 border-dashed';
-                        badge = (
-                          <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        // The actual correct answer (student missed it or didn't answer)
+                        containerStyle = 'border-emerald-500 bg-emerald-50/50 text-emerald-950 border-2 shadow-xs';
+                        letterBadgeStyle = 'bg-emerald-100 text-emerald-800 font-bold border border-emerald-300';
+                        statusBadge = (
+                          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[11px] font-bold flex-shrink-0">
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
                             <span>Correct Answer</span>
                           </span>
                         );
@@ -457,54 +512,60 @@ export const StudentExamReview: React.FC = () => {
                       return (
                         <div
                           key={choice.id}
-                          className={`p-3 rounded-xl border flex items-center justify-between text-xs transition-all ${choiceClass}`}
+                          className={`p-3.5 sm:p-4 rounded-2xl border flex items-center justify-between text-xs sm:text-sm transition-all ${containerStyle}`}
                         >
-                          <div className="flex items-center space-x-3">
+                          <div className="flex items-center space-x-3.5 flex-1 mr-3">
                             <span
-                              className={`w-6 h-6 rounded-lg font-bold text-[11px] flex items-center justify-center flex-shrink-0 ${
-                                isSelected
-                                  ? isChoiceCorrect
-                                    ? 'bg-emerald-600 text-white'
-                                    : 'bg-rose-600 text-white'
-                                  : isChoiceCorrect
-                                  ? 'bg-emerald-200 text-emerald-800'
-                                  : 'bg-slate-100 text-slate-600'
-                              }`}
+                              className={`w-7 h-7 rounded-lg text-xs flex items-center justify-center flex-shrink-0 ${letterBadgeStyle}`}
                             >
                               {letter}
                             </span>
-                            <div className="font-medium text-slate-800">
+                            <div className="font-medium text-slate-900 leading-normal">
                               <MathText content={choice.choice_text} />
                             </div>
                           </div>
 
-                          {badge && <div>{badge}</div>}
+                          {statusBadge && <div>{statusBadge}</div>}
                         </div>
                       );
                     })}
+
+                    {/* Unanswered callout banner */}
+                    {!selectedChoiceId && (
+                      <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 flex items-center space-x-2 mt-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        <span>No option was selected for this question. The correct option is highlighted above in green.</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Short Answer Breakdown */}
                 {q.question_type === 'short_answer' && (
                   <div className="space-y-3 pt-2">
-                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className={`p-4 rounded-2xl border ${isCorrect ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
                       <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
                         Your Submitted Response:
                       </span>
-                      <p className="text-xs font-semibold text-slate-900 font-mono">
+                      <p className="text-xs sm:text-sm font-semibold text-slate-900 font-mono">
                         {q.student_answer?.text_answer || (
-                          <span className="italic text-slate-400">No response provided</span>
+                          <span className="italic text-slate-400">No response submitted (Unanswered)</span>
                         )}
                       </p>
                     </div>
 
                     {q.choices?.[0]?.choice_text && (
-                      <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200">
-                        <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block mb-1">
-                          Correct Expected Answer:
-                        </span>
-                        <p className="text-xs font-bold text-emerald-950 font-mono">
+                      <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-300">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">
+                            Correct Expected Answer:
+                          </span>
+                          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Answer Key</span>
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm font-bold text-emerald-950 font-mono">
                           {q.choices[0].choice_text}
                         </p>
                       </div>
