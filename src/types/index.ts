@@ -166,3 +166,80 @@ export interface SubmitExamResponse {
   percentage: number;
   submitted_at: string;
 }
+
+export interface StudentSubmittedExam {
+  attempt_id: string;
+  exam_id: string;
+  exam_title: string;
+  exam_description?: string | null;
+  exam_start_time: string;
+  exam_end_time: string;
+  duration_minutes: number;
+  started_at: string;
+  submitted_at?: string | null;
+  status: AttemptStatus;
+  strike_count: number;
+  total_score: number;
+  max_possible_score: number;
+  percentage: number;
+  is_review_released: boolean;
+}
+
+export interface StudentReviewChoice {
+  id: string;
+  order_index: number;
+  choice_text: string;
+  is_correct?: boolean;
+}
+
+export interface StudentReviewQuestion {
+  id: string;
+  order_index: number;
+  question_text: string;
+  question_type: QuestionType;
+  points: number;
+  image_url?: string | null;
+  choices: StudentReviewChoice[];
+  student_answer?: {
+    selected_choice_id?: string | null;
+    text_answer?: string | null;
+    is_correct?: boolean | null;
+    points_earned?: number | null;
+  } | null;
+}
+
+export interface StudentExamReviewData {
+  attempt: {
+    id: string;
+    student_name: string;
+    student_email: string;
+    student_code?: string | null;
+    started_at: string;
+    submitted_at?: string | null;
+    status: AttemptStatus;
+    strike_count: number;
+    total_score: number;
+    max_possible_score: number;
+    percentage: number;
+  };
+  exam: {
+    id: string;
+    title: string;
+    description?: string | null;
+    instructions?: string | null;
+    start_time: string;
+    end_time: string;
+    duration_minutes: number;
+  };
+  questions: StudentReviewQuestion[];
+}
+
+export interface StudentProfileUser {
+  id: string;
+  full_name: string;
+  email: string;
+  role: 'student';
+  student_id?: string | null;
+  created_at: string;
+  attempt_count?: number;
+}

@@ -26,11 +26,13 @@ import { Input } from '@/components/ui/input';
 import { formatDate, formatTimeRemaining, getExamSlug, parseQuestionContent } from '@/lib/utils';
 import { parseExamConfig } from '@/lib/examConfig';
 import { MathText } from '@/components/ui/MathText';
+import { useAuth } from '@/features/auth/AuthContext';
 
 type ExamStep = 'lobby' | 'rules' | 'taking' | 'completed' | 'disqualified' | 'expired';
 
 export const StudentExamFlow: React.FC = () => {
   const { examId } = useParams<{ examId: string }>();
+  const { user, profile } = useAuth();
 
   // Exam and Question state
   const [exam, setExam] = useState<Exam | null>(null);
@@ -42,6 +44,21 @@ export const StudentExamFlow: React.FC = () => {
   const [studentName, setStudentName] = useState<string>('');
   const [studentEmail, setStudentEmail] = useState<string>('');
   const [studentCode, setStudentCode] = useState<string>('');
+
+  // Prefill identity if user is authenticated
+  useEffect(() => {
+    if (user?.email && !studentEmail) {
+      setStudentEmail(user.email);
+    }
+    const name = profile?.full_name || user?.user_metadata?.full_name;
+    if (name && !studentName) {
+      setStudentName(name);
+    }
+    const code = profile?.student_id || user?.user_metadata?.student_id;
+    if (code && !studentCode) {
+      setStudentCode(code);
+    }
+  }, [user, profile]);
 
   // Attempt State
   const [attemptId, setAttemptId] = useState<string | null>(null);

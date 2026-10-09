@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Layers,
+  Users,
   PlusCircle,
   User,
   LogOut,
@@ -29,10 +30,6 @@ export const AdminLayout: React.FC<{
     await signOut();
     navigate('/login');
   };
-
-  const navItems = [
-    { label: 'Examinations Hub', path: '/admin', icon: Layers },
-  ];
 
   const getInitials = () => {
     const name = profile?.full_name || user?.email || 'Admin';
@@ -81,6 +78,17 @@ export const AdminLayout: React.FC<{
               >
                 <Layers className="w-4 h-4 text-cyan-400" />
                 <span>Examinations Hub</span>
+              </Link>
+              <Link
+                to="/admin/students"
+                className={`w-full flex items-center space-x-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                  location.pathname.startsWith('/admin/students')
+                    ? 'bg-white/10 text-white shadow-sm border-l-4 border-cyan-400 pl-2 backdrop-blur-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span>Students Management</span>
               </Link>
             </nav>
           </div>

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Shield, Lock, Mail, User as UserIcon, AlertCircle, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/lib/supabase';
 
 export const LoginPage: React.FC = () => {
   const [isSignUp, setIsSignUp] = useState<boolean>(false);
@@ -14,11 +15,22 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
 
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, user, isAdmin, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/admin';
+
+  // If already authenticated, redirect to appropriate portal
+  useEffect(() => {
+    if (!isLoading && user) {
+      if (isAdmin) {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate('/student/dashboard', { replace: true });
+      }
+    }
+  }, [user, isAdmin, isLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,14 +48,31 @@ export const LoginPage: React.FC = () => {
         if (signUpError) {
           setError(signUpError.message);
         } else {
-          navigate('/admin');
+          // Public signups are always students
+          navigate('/student/dashboard');
         }
       } else {
         const { error: signInError } = await signIn(email, password);
         if (signInError) {
           setError(signInError.message);
         } else {
-          navigate(from);
+          // Determine user role for intelligent routing
+          const { data: { session } } = await supabase.auth.getSession();
+          let userRole = 'student';
+          if (session?.user) {
+            const { data: profileData } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', session.user.id)
+              .single();
+            userRole = profileData?.role || (session.user.user_metadata?.role === 'admin' ? 'admin' : 'student');
+          }
+
+          if (userRole === 'admin') {
+            navigate(from.startsWith('/admin') ? from : '/admin');
+          } else {
+            navigate('/student/dashboard');
+          }
         }
       }
     } catch (err: any) {
