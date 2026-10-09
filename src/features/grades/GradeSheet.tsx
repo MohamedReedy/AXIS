@@ -11,6 +11,10 @@ import {
   AlertTriangle,
   Eye,
   RefreshCw,
+  CheckCircle2,
+  Check,
+  Edit3,
+  Sparkles,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -20,7 +24,8 @@ import { AdminLayout } from '@/layouts/AdminLayout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Modal } from '@/components/ui/modal';
-import { formatDate } from '@/lib/utils';
+import { formatDate, parseQuestionContent } from '@/lib/utils';
+import { MathText } from '@/components/ui/MathText';
 
 export const GradeSheet: React.FC = () => {
   const { examId } = useParams<{ examId: string }>();
@@ -31,6 +36,8 @@ export const GradeSheet: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedStudent, setSelectedStudent] = useState<GradeSheetStudent | null>(null);
+  const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null);
+  const [customPointsInput, setCustomPointsInput] = useState<Record<string, string>>({});
 
   const loadGradeSheet = async () => {
     if (!examId) return;
@@ -124,6 +131,115 @@ export const GradeSheet: React.FC = () => {
   useEffect(() => {
     loadGradeSheet();
   }, [examId]);
+
+  const handleOverrideGrade = async (
+    questionId: string,
+    pointsToAward: number,
+    isCorrect: boolean
+  ) => {
+    if (!selectedStudent) return;
+
+    setGradingQuestionId(questionId);
+
+    try {
+      // 1. Try secure RPC
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('admin_override_grade', {
+        p_attempt_id: selectedStudent.attempt_id,
+        p_question_id: questionId,
+        p_points_earned: pointsToAward,
+        p_is_correct: isCorrect,
+      });
+
+      let updatedTotalScore: number;
+      let updatedPercentage: number;
+      let finalPointsEarned: number;
+      let finalIsCorrect: boolean;
+
+      if (!rpcErr && rpcRes && rpcRes.success) {
+        updatedTotalScore = Number(rpcRes.total_score);
+        updatedPercentage = Number(rpcRes.percentage);
+        finalPointsEarned = Number(rpcRes.points_earned);
+        finalIsCorrect = Boolean(rpcRes.is_correct);
+      } else {
+        // Fallback: direct updates
+        const { error: ansErr } = await supabase.from('answers').upsert(
+          {
+            attempt_id: selectedStudent.attempt_id,
+            question_id: questionId,
+            points_earned: pointsToAward,
+            is_correct: isCorrect,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'attempt_id,question_id' }
+        );
+        if (ansErr) throw ansErr;
+
+        const currentAnsMap = { ...selectedStudent.answers };
+        currentAnsMap[questionId] = {
+          ...currentAnsMap[questionId],
+          points_earned: pointsToAward,
+          is_correct: isCorrect,
+        };
+
+        updatedTotalScore = Object.values(currentAnsMap).reduce(
+          (sum: number, a: any) => sum + (Number(a.points_earned) || 0),
+          0
+        );
+        const maxScore = selectedStudent.max_possible_score || 1;
+        updatedPercentage = maxScore > 0 ? Math.round((updatedTotalScore / maxScore) * 10000) / 100 : 0;
+        finalPointsEarned = pointsToAward;
+        finalIsCorrect = isCorrect;
+
+        await supabase
+          .from('exam_attempts')
+          .update({
+            total_score: updatedTotalScore,
+            percentage: updatedPercentage,
+          })
+          .eq('id', selectedStudent.attempt_id);
+      }
+
+      // Update selectedStudent
+      const updatedAnswersMap = {
+        ...selectedStudent.answers,
+        [questionId]: {
+          ...selectedStudent.answers[questionId],
+          points_earned: finalPointsEarned,
+          is_correct: finalIsCorrect,
+        },
+      };
+
+      const updatedStudent: GradeSheetStudent = {
+        ...selectedStudent,
+        total_score: updatedTotalScore,
+        percentage: updatedPercentage,
+        answers: updatedAnswersMap,
+      };
+
+      setSelectedStudent(updatedStudent);
+
+      // Update in data.students
+      if (data) {
+        setData({
+          ...data,
+          students: data.students.map((st) =>
+            st.attempt_id === selectedStudent.attempt_id ? updatedStudent : st
+          ),
+        });
+      }
+
+      // Update custom input state
+      setCustomPointsInput((prev) => ({
+        ...prev,
+        [questionId]: String(finalPointsEarned),
+      }));
+    } catch (err: any) {
+      console.error('Failed to override grade in grade sheet:', err);
+      alert(`Failed to update grade: ${err.message || 'Unknown error'}`);
+    } finally {
+      setGradingQuestionId(null);
+    }
+  };
 
   // Export to CSV
   const handleExportCSV = () => {
@@ -418,63 +534,249 @@ export const GradeSheet: React.FC = () => {
           <Modal
             isOpen={!!selectedStudent}
             onClose={() => setSelectedStudent(null)}
-            title={`Detailed Submission: ${selectedStudent.student_name}`}
-            maxWidth="2xl"
+            title={`Submission Audit: ${selectedStudent.student_name}`}
+            maxWidth="4xl"
           >
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-3 p-4 bg-slate-50 rounded-xl text-xs border border-slate-200">
-                <div>
-                  <span className="text-slate-500 block font-semibold">Candidate:</span>
-                  <span className="text-slate-900 font-bold">{selectedStudent.student_name}</span>
+              {/* Overall Evaluation Card */}
+              <div className="bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200/60 pb-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                      Candidate Current Grade
+                    </span>
+                    <div className="flex items-baseline space-x-2 mt-0.5">
+                      <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                        {selectedStudent.total_score}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400">
+                        / {selectedStudent.max_possible_score} pts
+                      </span>
+                      <span
+                        className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                          (selectedStudent.percentage ?? 0) >= 75
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : (selectedStudent.percentage ?? 0) >= 50
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {selectedStudent.percentage ?? 0}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-600 bg-white px-3.5 py-2 rounded-xl border border-slate-200 flex items-center space-x-2">
+                    <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                    <span>
+                      <strong>Human-in-the-Loop:</strong> Award or withdraw question degrees below. Matrix updates automatically.
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold">Email:</span>
-                  <span className="text-slate-700 font-mono">{selectedStudent.student_email}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold">Status:</span>
-                  <span className={selectedStudent.status === 'submitted' ? 'badge-pill badge-ok' : 'badge-pill badge-bad'}>
-                    {selectedStudent.status.toUpperCase()}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold">Overall Score:</span>
-                  <span className="text-emerald-600 font-black text-sm">
-                    {selectedStudent.total_score} / {selectedStudent.max_possible_score} ({selectedStudent.percentage}%)
-                  </span>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Email:</span>
+                    <span className="text-slate-900 font-mono font-medium">{selectedStudent.student_email}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Student ID:</span>
+                    <span className="text-slate-900 font-medium">{selectedStudent.student_code || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Strikes:</span>
+                    <span className={`font-bold ${selectedStudent.strike_count > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                      {selectedStudent.strike_count} strikes logged
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Status:</span>
+                    <span className="font-bold uppercase text-slate-800">{selectedStudent.status}</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Question-by-Question Breakdown */}
+              {/* Question-by-Question Breakdown with Grading Overrides */}
               <div className="space-y-3">
-                <h4 className="font-bold text-sm text-slate-900">Answer Breakdown</h4>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
+                <h4 className="font-bold text-sm text-slate-900 flex items-center justify-between">
+                  <span>Questions & Candidate Responses ({data?.questions.length || 0})</span>
+                  <span className="text-xs font-normal text-slate-400">Review subjective or non-MCQ answers</span>
+                </h4>
+
+                <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
                   {data?.questions.map((q, idx) => {
                     const ans = selectedStudent.answers[q.id];
+                    const isQuestionGrading = gradingQuestionId === q.id;
+                    const { text: cleanPrompt, imageUrl } = parseQuestionContent(q.question_text);
+                    const candidateSubmission = ans?.selected_choice_text || ans?.text_answer;
+                    const isShortAnswer = q.question_type === 'short_answer';
+                    const currentPoints = ans?.points_earned !== undefined ? Number(ans.points_earned) : 0;
+                    const isCorrect = ans?.is_correct ?? false;
+
                     return (
                       <div
                         key={q.id}
-                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1"
+                        className={`p-4 rounded-2xl border text-xs space-y-3 transition-all ${
+                          isCorrect
+                            ? 'bg-emerald-50/30 border-emerald-200'
+                            : currentPoints > 0
+                            ? 'bg-amber-50/30 border-amber-200'
+                            : 'bg-white border-slate-200'
+                        }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900">
-                            Q{idx + 1}: {q.question_text}
-                          </span>
+                        {/* Header */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="w-5 h-5 rounded-md bg-blue-50 text-blue-700 font-black text-[10px] flex items-center justify-center border border-blue-100">
+                              {q.order_index || idx + 1}
+                            </span>
+                            <span className="font-bold text-slate-800 text-xs">
+                              Question {q.order_index || idx + 1}
+                            </span>
+                            <span
+                              className={`px-2 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                isShortAnswer
+                                  ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}
+                            >
+                              {isShortAnswer
+                                ? 'Short Answer (Text)'
+                                : q.question_type === 'true_false'
+                                ? 'True / False'
+                                : 'Multiple Choice'}
+                            </span>
+                          </div>
+
                           <span
-                            className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                              ans?.is_correct
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-red-100 text-red-800'
+                            className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full font-mono font-bold text-xs ${
+                              isCorrect
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : currentPoints > 0
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
                             }`}
                           >
-                            {ans ? `${ans.points_earned}/${q.points} pts` : `0/${q.points} pts`}
+                            {isCorrect ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            ) : currentPoints > 0 ? (
+                              <Check className="w-3.5 h-3.5 text-amber-600" />
+                            ) : (
+                              <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                            )}
+                            <span>
+                              {currentPoints} / {q.points} Pts
+                            </span>
                           </span>
                         </div>
-                        <div className="text-slate-600">
-                          Selected:{' '}
-                          <strong className="text-slate-900">
-                            {ans?.selected_choice_text || ans?.text_answer || 'None / Not Answered'}
-                          </strong>
+
+                        {/* Prompt */}
+                        <div className="text-slate-900 font-medium text-xs leading-relaxed">
+                          <MathText content={cleanPrompt} />
+                        </div>
+
+                        {imageUrl && (
+                          <div className="p-2 border border-slate-200 rounded-xl bg-slate-50 inline-block">
+                            <img src={imageUrl} alt="Diagram" className="max-h-40 rounded-lg object-contain" />
+                          </div>
+                        )}
+
+                        {/* Candidate response box */}
+                        <div
+                          className={`p-3 rounded-xl border ${
+                            candidateSubmission
+                              ? 'bg-slate-50/80 border-slate-200'
+                              : 'bg-amber-50/40 border-amber-200'
+                          }`}
+                        >
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                            Candidate Submitted Response:
+                          </span>
+                          <div className="font-semibold text-slate-900 break-words">
+                            {candidateSubmission ? (
+                              <MathText content={candidateSubmission} />
+                            ) : (
+                              <span className="italic text-slate-400 font-normal">
+                                Blank / No response submitted
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Grading Action Bar */}
+                        <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-slate-50/70 p-2.5 rounded-xl">
+                          <div className="flex items-center space-x-1.5 text-[11px] font-bold text-slate-500">
+                            <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Degree Override:</span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            {/* Award Full Points */}
+                            <button
+                              type="button"
+                              disabled={isQuestionGrading || (isCorrect && currentPoints === q.points)}
+                              onClick={() => handleOverrideGrade(q.id, q.points, true)}
+                              className={`px-3 py-1 rounded-xl font-bold text-xs flex items-center space-x-1 transition-all cursor-pointer ${
+                                isCorrect && currentPoints === q.points
+                                  ? 'bg-emerald-600 text-white shadow-xs cursor-default'
+                                  : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 active:scale-95'
+                              }`}
+                              title="Award full points and mark correct"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Award Full ({q.points} pts)</span>
+                            </button>
+
+                            {/* Withdraw Points */}
+                            <button
+                              type="button"
+                              disabled={isQuestionGrading || (!isCorrect && currentPoints === 0)}
+                              onClick={() => handleOverrideGrade(q.id, 0, false)}
+                              className={`px-3 py-1 rounded-xl font-bold text-xs flex items-center space-x-1 transition-all cursor-pointer ${
+                                !isCorrect && currentPoints === 0
+                                  ? 'bg-rose-600 text-white shadow-xs cursor-default'
+                                  : 'bg-rose-100 text-rose-800 hover:bg-rose-200 active:scale-95'
+                              }`}
+                              title="Withdraw points and mark incorrect"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Withdraw (0 pts)</span>
+                            </button>
+
+                            {/* Custom partial credit */}
+                            <div className="flex items-center space-x-1 pl-2 border-l border-slate-200">
+                              <input
+                                type="number"
+                                min="0"
+                                max={q.points}
+                                step="0.5"
+                                value={customPointsInput[q.id] ?? currentPoints}
+                                onChange={(e) =>
+                                  setCustomPointsInput((prev) => ({
+                                    ...prev,
+                                    [q.id]: e.target.value,
+                                  }))
+                                }
+                                className="w-16 px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-mono font-bold text-slate-800 text-center"
+                                placeholder="Pts"
+                              />
+                              <button
+                                type="button"
+                                disabled={isQuestionGrading}
+                                onClick={() => {
+                                  const val = parseFloat(
+                                    customPointsInput[q.id] ?? String(currentPoints)
+                                  );
+                                  if (!isNaN(val)) {
+                                    handleOverrideGrade(q.id, val, val > 0);
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs transition-all active:scale-95 cursor-pointer"
+                              >
+                                {isQuestionGrading ? '...' : 'Set'}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );

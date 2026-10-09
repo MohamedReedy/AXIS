@@ -22,6 +22,7 @@ import {
   FileText,
   CheckCircle2,
   XCircle,
+  Sparkles,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Exam, ExamAttempt, Violation } from '@/types';
@@ -29,20 +30,24 @@ import { AdminLayout } from '@/layouts/AdminLayout';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { formatDate, getExamSlug } from '@/lib/utils';
+import { formatDate, getExamSlug, parseQuestionContent } from '@/lib/utils';
+import { MathText } from '@/components/ui/MathText';
 import { ExamQuestionsModal } from './ExamQuestionsModal';
 import { EditScheduleModal } from './EditScheduleModal';
 
 interface InspectedAnswer {
   id: string;
   question_id: string;
+  order_index?: number;
+  question_text?: string;
+  question_type?: 'multiple_choice' | 'true_false' | 'short_answer';
+  max_points?: number;
+  expected_answer?: string;
   selected_choice_id: string | null;
+  selected_choice_text?: string;
   text_answer: string | null;
   is_correct: boolean;
   points_earned: number;
-  question_text?: string;
-  max_points?: number;
-  selected_choice_text?: string;
 }
 
 export const ExamDashboard: React.FC = () => {
@@ -65,6 +70,8 @@ export const ExamDashboard: React.FC = () => {
   const [inspectAnswers, setInspectAnswers] = useState<InspectedAnswer[]>([]);
   const [inspectTab, setInspectTab] = useState<'violations' | 'answers'>('violations');
   const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(false);
+  const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null);
+  const [customPointsInput, setCustomPointsInput] = useState<Record<string, string>>({});
 
   // Modals
   const [isQuestionsModalOpen, setIsQuestionsModalOpen] = useState<boolean>(false);
@@ -261,47 +268,193 @@ export const ExamDashboard: React.FC = () => {
         .order('timestamp', { ascending: true });
       setInspectViolations((vData as Violation[]) || []);
 
-      // 2. Fetch answers with question details
+      // 2. Fetch all exam questions with choices
+      const { data: qData } = await supabase
+        .from('questions')
+        .select(`
+          id,
+          order_index,
+          question_text,
+          question_type,
+          points,
+          choices:question_choices(id, order_index, choice_text, is_correct)
+        `)
+        .eq('exam_id', examId!)
+        .order('order_index');
+
+      // 3. Fetch candidate answers
       const { data: aData } = await supabase
         .from('answers')
-        .select('id, question_id, selected_choice_id, text_answer, is_correct, points_earned, questions(question_text, points)')
+        .select('*')
         .eq('attempt_id', attempt.id);
 
-      // Fetch selected choices text
-      const choiceIds = (aData || [])
-        .map((a: any) => a.selected_choice_id)
-        .filter(Boolean);
+      const answersMap: Record<string, any> = {};
+      (aData || []).forEach((ans: any) => {
+        answersMap[ans.question_id] = ans;
+      });
 
-      let choicesMap: Record<string, string> = {};
-      if (choiceIds.length > 0) {
-        const { data: cData } = await supabase
-          .from('question_choices')
-          .select('id, choice_text')
-          .in('id', choiceIds);
-        if (cData) {
-          cData.forEach((c: any) => {
-            choicesMap[c.id] = c.choice_text;
-          });
+      const initialCustomInputs: Record<string, string> = {};
+
+      const formattedAnswers: InspectedAnswer[] = (qData || []).map((q: any) => {
+        const userAns = answersMap[q.id];
+        const choices = q.choices || [];
+
+        let expectedAnswer = '';
+        if (q.question_type === 'short_answer') {
+          expectedAnswer =
+            choices.find((c: any) => c.is_correct)?.choice_text || choices[0]?.choice_text || '';
+        } else {
+          const correctChoice = choices.find((c: any) => c.is_correct);
+          expectedAnswer = correctChoice ? correctChoice.choice_text : '';
         }
-      }
 
-      const formattedAnswers: InspectedAnswer[] = (aData || []).map((ans: any) => ({
-        id: ans.id,
-        question_id: ans.question_id,
-        selected_choice_id: ans.selected_choice_id,
-        text_answer: ans.text_answer,
-        is_correct: ans.is_correct,
-        points_earned: ans.points_earned,
-        question_text: ans.questions?.question_text,
-        max_points: ans.questions?.points,
-        selected_choice_text: ans.selected_choice_id ? choicesMap[ans.selected_choice_id] : undefined,
-      }));
+        let selectedChoiceText: string | undefined = undefined;
+        if (userAns?.selected_choice_id) {
+          const selectedC = choices.find((c: any) => c.id === userAns.selected_choice_id);
+          selectedChoiceText = selectedC?.choice_text;
+        }
+
+        const pointsEarned =
+          userAns?.points_earned !== undefined && userAns?.points_earned !== null
+            ? Number(userAns.points_earned)
+            : userAns?.is_correct
+            ? q.points
+            : 0;
+
+        initialCustomInputs[q.id] = String(pointsEarned);
+
+        return {
+          id: userAns?.id || `ans_${q.id}`,
+          question_id: q.id,
+          order_index: q.order_index,
+          question_text: q.question_text,
+          question_type: q.question_type,
+          max_points: q.points,
+          expected_answer: expectedAnswer,
+          selected_choice_id: userAns?.selected_choice_id || null,
+          selected_choice_text: selectedChoiceText,
+          text_answer: userAns?.text_answer || null,
+          is_correct: userAns?.is_correct ?? false,
+          points_earned: pointsEarned,
+        };
+      });
 
       setInspectAnswers(formattedAnswers);
+      setCustomPointsInput(initialCustomInputs);
     } catch (err) {
       console.error('Failed to load audit data:', err);
     } finally {
       setIsLoadingAudit(false);
+    }
+  };
+
+  const handleOverrideGrade = async (
+    questionId: string,
+    pointsToAward: number,
+    isCorrect: boolean
+  ) => {
+    if (!inspectAttempt) return;
+
+    setGradingQuestionId(questionId);
+
+    try {
+      // 1. Try secure RPC first
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('admin_override_grade', {
+        p_attempt_id: inspectAttempt.id,
+        p_question_id: questionId,
+        p_points_earned: pointsToAward,
+        p_is_correct: isCorrect,
+      });
+
+      let updatedTotalScore: number;
+      let updatedPercentage: number;
+      let finalPointsEarned: number;
+      let finalIsCorrect: boolean;
+
+      if (!rpcErr && rpcRes && rpcRes.success) {
+        updatedTotalScore = Number(rpcRes.total_score);
+        updatedPercentage = Number(rpcRes.percentage);
+        finalPointsEarned = Number(rpcRes.points_earned);
+        finalIsCorrect = Boolean(rpcRes.is_correct);
+      } else {
+        // Fallback: Direct client updates
+        console.warn('RPC admin_override_grade fallback:', rpcErr?.message);
+
+        // A. Upsert answer
+        const { error: ansErr } = await supabase.from('answers').upsert(
+          {
+            attempt_id: inspectAttempt.id,
+            question_id: questionId,
+            points_earned: pointsToAward,
+            is_correct: isCorrect,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'attempt_id,question_id' }
+        );
+        if (ansErr) throw ansErr;
+
+        // B. Recompute total score and percentage
+        const updatedAnswers = inspectAnswers.map((a) =>
+          a.question_id === questionId
+            ? { ...a, points_earned: pointsToAward, is_correct: isCorrect }
+            : a
+        );
+
+        updatedTotalScore = updatedAnswers.reduce((sum, a) => sum + (a.points_earned || 0), 0);
+        const maxScore = inspectAttempt.max_possible_score || (exam?.duration_minutes ? 100 : 1);
+        updatedPercentage = maxScore > 0 ? Math.round((updatedTotalScore / maxScore) * 10000) / 100 : 0;
+        finalPointsEarned = pointsToAward;
+        finalIsCorrect = isCorrect;
+
+        // C. Update exam_attempts
+        await supabase
+          .from('exam_attempts')
+          .update({
+            total_score: updatedTotalScore,
+            percentage: updatedPercentage,
+          })
+          .eq('id', inspectAttempt.id);
+      }
+
+      // Update inspectAnswers state
+      setInspectAnswers((prev) =>
+        prev.map((a) =>
+          a.question_id === questionId
+            ? { ...a, points_earned: finalPointsEarned, is_correct: finalIsCorrect }
+            : a
+        )
+      );
+
+      // Update custom input state for this question
+      setCustomPointsInput((prev) => ({
+        ...prev,
+        [questionId]: String(finalPointsEarned),
+      }));
+
+      // Update inspectAttempt state
+      setInspectAttempt((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_score: updatedTotalScore,
+              percentage: updatedPercentage,
+            }
+          : null
+      );
+
+      // Update attempts list so background table reflects updated score immediately
+      setAttempts((prev) =>
+        prev.map((att) =>
+          att.id === inspectAttempt.id
+            ? { ...att, total_score: updatedTotalScore, percentage: updatedPercentage }
+            : att
+        )
+      );
+    } catch (err: any) {
+      console.error('Failed to override grade:', err);
+      alert(`Failed to update grade: ${err.message || 'Unknown error'}`);
+    } finally {
+      setGradingQuestionId(null);
     }
   };
 
@@ -736,55 +889,64 @@ export const ExamDashboard: React.FC = () => {
             isOpen={!!inspectAttempt}
             onClose={() => setInspectAttempt(null)}
             title={`Integrity Audit & Responses: ${inspectAttempt.student_name}`}
-            maxWidth="2xl"
+            maxWidth="4xl"
           >
             <div className="space-y-5">
-              {/* Student Metadata Card */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-2xl text-xs border border-slate-200">
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Email:</span>
-                  <span className="text-slate-900 font-mono">{inspectAttempt.student_email}</span>
+              {/* Overall Evaluation & Student Info Card */}
+              <div className="bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200/60 pb-3">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                      Candidate Current Grade
+                    </span>
+                    <div className="flex items-baseline space-x-2 mt-0.5">
+                      <span className="text-2xl sm:text-3xl font-black text-slate-900">
+                        {inspectAttempt.total_score}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400">
+                        / {inspectAttempt.max_possible_score} pts
+                      </span>
+                      <span
+                        className={`text-xs font-black px-2.5 py-0.5 rounded-full ${
+                          (inspectAttempt.percentage ?? 0) >= 75
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : (inspectAttempt.percentage ?? 0) >= 50
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {inspectAttempt.percentage ?? 0}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-600 bg-white px-3.5 py-2 rounded-xl border border-slate-200 flex items-center space-x-2">
+                    <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                    <span>
+                      <strong>Human-in-the-Loop:</strong> Adjust non-MCQ or subjective degrees below. Changes save and recalculate instantly.
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Student ID:</span>
-                  <span className="text-slate-900 font-medium">{inspectAttempt.student_code || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Total Score:</span>
-                  <span className="text-emerald-600 font-black font-mono">
-                    {inspectAttempt.total_score} / {inspectAttempt.max_possible_score} ({inspectAttempt.percentage}%)
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Cheating Strikes:</span>
-                  <span className={`font-bold ${inspectAttempt.strike_count > 0 ? 'text-rose-600' : 'text-slate-600'}`}>
-                    {inspectAttempt.strike_count} / {exam?.max_strikes || 3} strikes
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Status:</span>
-                  <span className="font-bold uppercase text-[11px] text-slate-800">{inspectAttempt.status}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Started:</span>
-                  <span className="text-slate-700">{formatDate(inspectAttempt.started_at)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Submitted:</span>
-                  <span className="text-slate-700">{formatDate(inspectAttempt.submitted_at)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block font-semibold text-[11px]">Grade Sheet:</span>
-                  <button
-                    onClick={() => {
-                      setInspectAttempt(null);
-                      navigate(`/admin/exam/${examId}/grades`);
-                    }}
-                    className="text-blue-600 hover:text-blue-800 font-bold hover:underline inline-flex items-center space-x-1"
-                  >
-                    <span>View Matrix</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Email:</span>
+                    <span className="text-slate-900 font-mono font-medium">{inspectAttempt.student_email}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Student ID:</span>
+                    <span className="text-slate-900 font-medium">{inspectAttempt.student_code || 'N/A'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Cheating Strikes:</span>
+                    <span className={`font-bold ${inspectAttempt.strike_count > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                      {inspectAttempt.strike_count} / {exam?.max_strikes || 3} strikes
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-semibold text-[10px] uppercase">Status:</span>
+                    <span className="font-bold uppercase text-slate-800">{inspectAttempt.status}</span>
+                  </div>
                 </div>
               </div>
 
@@ -821,7 +983,7 @@ export const ExamDashboard: React.FC = () => {
                 /* Violations Tab */
                 <div className="space-y-3">
                   {inspectViolations.length > 0 ? (
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                       {inspectViolations.map((v) => (
                         <div
                           key={v.id}
@@ -846,47 +1008,222 @@ export const ExamDashboard: React.FC = () => {
                   )}
                 </div>
               ) : (
-                /* Answers Tab */
+                /* Answers Tab with Human-in-the-Loop Manual Grading Controls */
                 <div className="space-y-3">
                   {inspectAnswers.length > 0 ? (
-                    <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
-                      {inspectAnswers.map((ans, idx) => (
-                        <div
-                          key={ans.id}
-                          className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
-                            ans.is_correct
-                              ? 'bg-emerald-50/50 border-emerald-200'
-                              : 'bg-slate-50 border-slate-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-slate-900">
-                              Question {idx + 1}: {ans.question_text || 'Assessment Question'}
-                            </span>
-                            <span className="flex items-center space-x-1 font-mono font-bold">
-                              {ans.is_correct ? (
-                                <span className="text-emerald-700 flex items-center space-x-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>+{ans.points_earned} Pts</span>
-                                </span>
-                              ) : (
-                                <span className="text-slate-500 flex items-center space-x-1">
-                                  <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                                  <span>0 / {ans.max_points || 1} Pts</span>
-                                </span>
-                              )}
-                            </span>
-                          </div>
+                    <div className="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1.5">
+                      {inspectAnswers.map((ans, idx) => {
+                        const isQuestionGrading = gradingQuestionId === ans.question_id;
+                        const { text: cleanPrompt, imageUrl } = parseQuestionContent(ans.question_text);
+                        const candidateSubmission = ans.selected_choice_text || ans.text_answer;
+                        const isShortAnswer = ans.question_type === 'short_answer';
 
-                          <div className="text-slate-600 bg-white p-2 rounded-lg border border-slate-100 font-medium">
-                            <span className="text-slate-400 text-[11px] block">Candidate Choice:</span>
-                            <span>{ans.selected_choice_text || ans.text_answer || 'No response recorded (submitted blank)'}</span>
+                        return (
+                          <div
+                            key={ans.question_id}
+                            className={`p-4 sm:p-5 rounded-2xl border text-xs space-y-3 transition-all ${
+                              ans.is_correct
+                                ? 'bg-emerald-50/30 border-emerald-200 shadow-xs'
+                                : ans.points_earned > 0
+                                ? 'bg-amber-50/30 border-amber-200 shadow-xs'
+                                : 'bg-white border-slate-200 shadow-xs'
+                            }`}
+                          >
+                            {/* Question Header: Number, Type Badge, Current Score Badge */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                              <div className="flex items-center space-x-2">
+                                <span className="w-6 h-6 rounded-lg bg-blue-50 text-blue-700 font-black text-[11px] flex items-center justify-center border border-blue-100 shadow-xs">
+                                  {ans.order_index || idx + 1}
+                                </span>
+                                <span className="font-bold text-slate-900 text-xs">
+                                  Question {ans.order_index || idx + 1}
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                                    isShortAnswer
+                                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                      : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                  }`}
+                                >
+                                  {isShortAnswer
+                                    ? 'Short Answer (Text)'
+                                    : ans.question_type === 'true_false'
+                                    ? 'True / False'
+                                    : 'Multiple Choice'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                <span
+                                  className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full font-mono font-bold text-xs ${
+                                    ans.is_correct
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : ans.points_earned > 0
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  }`}
+                                >
+                                  {ans.is_correct ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  ) : ans.points_earned > 0 ? (
+                                    <Check className="w-3.5 h-3.5 text-amber-600" />
+                                  ) : (
+                                    <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                                  )}
+                                  <span>
+                                    {ans.points_earned} / {ans.max_points || 1} Pts
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Question Prompt */}
+                            <div className="text-slate-900 font-semibold text-xs leading-relaxed">
+                              <MathText content={cleanPrompt} />
+                            </div>
+
+                            {/* Attached Diagram / Image */}
+                            {imageUrl && (
+                              <div className="p-2 border border-slate-200 rounded-xl bg-slate-50 inline-block">
+                                <img
+                                  src={imageUrl}
+                                  alt="Question Diagram"
+                                  className="max-h-48 rounded-lg object-contain"
+                                />
+                              </div>
+                            )}
+
+                            {/* Answer Comparison Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                              {/* Candidate Submission */}
+                              <div
+                                className={`p-3 rounded-xl border ${
+                                  candidateSubmission
+                                    ? 'bg-slate-50/80 border-slate-200'
+                                    : 'bg-amber-50/50 border-amber-200'
+                                }`}
+                              >
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                  Candidate Submitted Response:
+                                </span>
+                                <div className="font-semibold text-slate-900 break-words">
+                                  {candidateSubmission ? (
+                                    <MathText content={candidateSubmission} />
+                                  ) : (
+                                    <span className="italic text-slate-400 font-normal">
+                                      Blank / No response recorded
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Official Answer Key */}
+                              <div className="p-3 rounded-xl border bg-emerald-50/40 border-emerald-200">
+                                <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block mb-1">
+                                  Official Answer Key / Reference:
+                                </span>
+                                <div className="font-semibold text-emerald-950 break-words">
+                                  {ans.expected_answer ? (
+                                    <MathText content={ans.expected_answer} />
+                                  ) : (
+                                    <span className="italic text-slate-400 font-normal">
+                                      No key specified
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Human-in-the-Loop Admin Controls */}
+                            <div className="mt-2 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5 bg-slate-50/70 p-3 rounded-xl">
+                              <div className="flex items-center space-x-1.5 text-[11px] font-bold text-slate-600">
+                                <Edit3 className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Human Degree Override:</span>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                {/* Quick Action: Award Full Points */}
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isQuestionGrading ||
+                                    (ans.is_correct && ans.points_earned === (ans.max_points || 1))
+                                  }
+                                  onClick={() =>
+                                    handleOverrideGrade(ans.question_id, ans.max_points || 1, true)
+                                  }
+                                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 transition-all cursor-pointer ${
+                                    ans.is_correct && ans.points_earned === (ans.max_points || 1)
+                                      ? 'bg-emerald-600 text-white shadow-xs cursor-default'
+                                      : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 active:scale-95'
+                                  }`}
+                                  title="Award full points and mark as correct"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Award Full ({ans.max_points || 1} pts)</span>
+                                </button>
+
+                                {/* Quick Action: Withdraw Points */}
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isQuestionGrading ||
+                                    (!ans.is_correct && ans.points_earned === 0)
+                                  }
+                                  onClick={() => handleOverrideGrade(ans.question_id, 0, false)}
+                                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 transition-all cursor-pointer ${
+                                    !ans.is_correct && ans.points_earned === 0
+                                      ? 'bg-rose-600 text-white shadow-xs cursor-default'
+                                      : 'bg-rose-100 text-rose-800 hover:bg-rose-200 active:scale-95'
+                                  }`}
+                                  title="Withdraw points and mark as incorrect"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                  <span>Withdraw (0 pts)</span>
+                                </button>
+
+                                {/* Custom Points Input */}
+                                <div className="flex items-center space-x-1 pl-2 border-l border-slate-200">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={ans.max_points || 100}
+                                    step="0.5"
+                                    value={customPointsInput[ans.question_id] ?? ans.points_earned}
+                                    onChange={(e) =>
+                                      setCustomPointsInput((prev) => ({
+                                        ...prev,
+                                        [ans.question_id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-16 px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-mono font-bold text-slate-800 text-center"
+                                    placeholder="Pts"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={isQuestionGrading}
+                                    onClick={() => {
+                                      const val = parseFloat(
+                                        customPointsInput[ans.question_id] ?? String(ans.points_earned)
+                                      );
+                                      if (!isNaN(val)) {
+                                        handleOverrideGrade(ans.question_id, val, val > 0);
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs transition-all active:scale-95 cursor-pointer"
+                                    title="Set custom points"
+                                  >
+                                    {isQuestionGrading ? '...' : 'Set'}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
-                    <p className="text-xs text-slate-500 bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
+                    <p className="text-xs text-slate-500 bg-slate-50 p-6 rounded-2xl border border-slate-200 text-center">
                       No response items recorded for this candidate attempt yet.
                     </p>
                   )}
