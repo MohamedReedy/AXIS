@@ -570,9 +570,21 @@ export const StudentExamReview: React.FC = () => {
                     {!selectedChoiceId && (
                       <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 flex items-center space-x-2 mt-2">
                         <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                        <span>No option was selected for this question. The correct option is highlighted above in green.</span>
+                        <span>
+                          {q.choices.some((c) => c.is_correct)
+                            ? 'No option was selected for this question. The correct option is highlighted above in green.'
+                            : 'No option was selected for this question.'}
+                        </span>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Empty choices notice if choices failed to load */}
+                {q.question_type !== 'short_answer' && (!q.choices || q.choices.length === 0) && (
+                  <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200/80 text-xs text-amber-800 flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span>Choices are currently loading or awaiting release permissions.</span>
                   </div>
                 )}
 

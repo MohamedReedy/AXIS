@@ -204,11 +204,11 @@ BEGIN
 
     -- 2. Validate Ownership (Caller must be student owner or admin)
     IF NOT v_is_admin THEN
-        IF v_caller_id IS NOT NULL AND v_attempt.student_id IS NOT NULL AND v_attempt.student_id <> v_caller_id THEN
-            IF v_caller_email IS NULL OR lower(v_attempt.student_email) <> v_caller_email THEN
-                RAISE EXCEPTION 'Unauthorized to view this attempt review';
-            END IF;
-        ELSIF v_caller_email IS NOT NULL AND lower(v_attempt.student_email) <> v_caller_email THEN
+        IF (v_caller_id IS NOT NULL AND v_attempt.student_id IS NOT NULL AND v_attempt.student_id = v_caller_id)
+           OR (v_caller_email IS NOT NULL AND lower(trim(v_attempt.student_email)) = lower(trim(v_caller_email))) THEN
+            -- Authorized student
+            NULL;
+        ELSE
             RAISE EXCEPTION 'Unauthorized to view this attempt review';
         END IF;
     END IF;
@@ -315,3 +315,50 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 6. Link any past attempts (where student_id was NULL) to profiles by email
+UPDATE public.exam_attempts a
+SET student_id = p.id
+FROM public.profiles p
+WHERE a.student_id IS NULL
+  AND lower(trim(a.student_email)) = lower(trim(p.email));
+
+-- 7. RLS Policy: Allow students to view question choices (including is_correct) once exam end_time has passed
+DROP POLICY IF EXISTS "Students can view question choices after exam end time" ON public.question_choices;
+CREATE POLICY "Students can view question choices after exam end time"
+    ON public.question_choices FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.questions q
+            JOIN public.exams e ON e.id = q.exam_id
+            WHERE q.id = question_choices.question_id
+              AND now() >= e.end_time
+        )
+    );
+
+-- 8. RLS Policy: Allow students to view their own exam attempts by student_id or email
+DROP POLICY IF EXISTS "Students can view their own attempts" ON public.exam_attempts;
+CREATE POLICY "Students can view their own attempts"
+    ON public.exam_attempts FOR SELECT
+    USING (
+        auth.uid() = student_id
+        OR lower(trim(student_email)) = lower(trim(auth.jwt()->>'email'))
+        OR (auth.uid() IS NULL AND lower(trim(student_email)) = lower(trim(current_setting('request.jwt.claim.email', true))))
+    );
+
+-- 9. RLS Policy: Allow students to view their own submitted answers by student_id or email
+DROP POLICY IF EXISTS "Students can view and save their own answers" ON public.answers;
+CREATE POLICY "Students can view and save their own answers"
+    ON public.answers FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.exam_attempts a
+            WHERE a.id = answers.attempt_id
+              AND (
+                a.student_id = auth.uid()
+                OR lower(trim(a.student_email)) = lower(trim(auth.jwt()->>'email'))
+                OR auth.uid() IS NULL
+              )
+        )
+    );
+
