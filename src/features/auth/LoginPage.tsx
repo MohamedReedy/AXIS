@@ -171,15 +171,15 @@ export const LoginPage: React.FC = () => {
           <div className="bg-white border border-slate-200 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/50 space-y-6">
             <div className="space-y-2 text-left">
               <span className="badge-pill badge-axis font-bold text-[11px]">
-                {isSignUp ? 'New Registration' : 'Administrative Portal'}
+                {isSignUp ? 'Student Registration' : 'Account Sign In'}
               </span>
               <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                {isSignUp ? 'Create Admin Account' : 'Sign in to AXIS'}
+                {isSignUp ? 'Create Student Account' : 'Sign in to AXIS'}
               </h2>
               <p className="text-xs text-slate-500 font-medium leading-relaxed">
                 {isSignUp
-                  ? 'Register to manage exams, review attempts, and inspect telemetry.'
-                  : 'Enter your credentials to access the examination control center.'}
+                  ? 'Register your student account to access your assessments, track your scores, and inspect solutions.'
+                  : 'Enter your credentials to access your assessment portal and examination center.'}
               </p>
             </div>
 
@@ -196,15 +196,15 @@ export const LoginPage: React.FC = () => {
                   <Input
                     label="Full Name"
                     type="text"
-                    placeholder="e.g. Dr. Ahmed Hassan"
+                    placeholder="e.g. Ahmed Mohamed"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     required
                   />
                   <Input
-                    label="Admin / Employee ID (Optional)"
+                    label="Student ID / Academic Code (Optional)"
                     type="text"
-                    placeholder="e.g. ADM-102"
+                    placeholder="e.g. STU-102"
                     value={studentId}
                     onChange={(e) => setStudentId(e.target.value)}
                   />
@@ -214,7 +214,7 @@ export const LoginPage: React.FC = () => {
               <Input
                 label="Email Address"
                 type="email"
-                placeholder="admin@company.com"
+                placeholder="student@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -235,7 +235,7 @@ export const LoginPage: React.FC = () => {
                 className="w-full flex items-center justify-center space-x-2 mt-4 bg-[#0B3A82] hover:bg-[#082C66] active:bg-[#062252] text-white font-bold py-3 shadow-xs hover:shadow-md hover:brightness-105 transition-all cursor-pointer border border-[#0B3A82]"
                 isLoading={loading}
               >
-                <span>{isSignUp ? 'Create Account' : 'Sign In'}</span>
+                <span>{isSignUp ? 'Register as Student' : 'Sign In'}</span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </form>
@@ -249,14 +249,14 @@ export const LoginPage: React.FC = () => {
                 }}
                 className="text-xs text-[#0052D4] hover:text-[#0041A8] font-bold transition-colors cursor-pointer"
               >
-                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+                {isSignUp ? 'Already have an account? Sign In' : 'New student? Register account here'}
               </button>
             </div>
           </div>
 
           {/* Student Exam Notice */}
           <div className="callout-axis info text-center text-xs">
-            <span className="font-bold">Student Notice:</span> Candidates taking an exam do not need an account — simply open the direct exam link provided by your examiner.
+            <span className="font-bold">Student Notice:</span> Sign in to access your assessment dashboard, view scores, and inspect answers once released.
           </div>
         </div>
       </div>

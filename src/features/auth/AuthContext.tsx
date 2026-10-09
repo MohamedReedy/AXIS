@@ -105,10 +105,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Create profile row if not created via trigger
       await supabase.from('profiles').upsert({
         id: data.user.id,
-        full_name: fullName,
-        email: email,
+        full_name: fullName.trim(),
+        email: email.trim().toLowerCase(),
         role: 'student',
-        student_id: studentId || null,
+        student_id: studentId?.trim() || null,
       });
     }
 
@@ -122,7 +122,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
   };
 
-  const isAdmin = profile?.role === 'admin' || user?.user_metadata?.role === 'admin';
+  // Strictly enforce admin role from the database profiles table only
+  const isAdmin = profile?.role === 'admin';
 
   return (
     <AuthContext.Provider
