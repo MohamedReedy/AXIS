@@ -122,6 +122,28 @@ export const StudentExamReview: React.FC = () => {
 
       if (qErr) throw qErr;
 
+      // If question_choices were blocked by RLS, load from student_question_choices view
+      const hasEmptyChoices = (questions || []).some(
+        (q: any) => q.question_type !== 'short_answer' && (!q.choices || q.choices.length === 0)
+      );
+
+      const fallbackChoicesMap: Record<string, any[]> = {};
+      if (hasEmptyChoices && questions && questions.length > 0) {
+        const questionIds = questions.map((q: any) => q.id);
+        const { data: viewChoices } = await supabase
+          .from('student_question_choices')
+          .select('id, question_id, order_index, choice_text')
+          .in('question_id', questionIds)
+          .order('order_index');
+
+        if (viewChoices) {
+          viewChoices.forEach((c) => {
+            if (!fallbackChoicesMap[c.question_id]) fallbackChoicesMap[c.question_id] = [];
+            fallbackChoicesMap[c.question_id].push(c);
+          });
+        }
+      }
+
       // 4. Fetch student answers for this attempt
       const { data: answers } = await supabase
         .from('answers')
@@ -134,9 +156,23 @@ export const StudentExamReview: React.FC = () => {
       });
 
       const formattedQuestions: StudentReviewQuestion[] = (questions || []).map((q: any) => {
-        const sortedChoices = (q.choices || []).sort(
+        const rawChoices = (q.choices && q.choices.length > 0)
+          ? q.choices
+          : (fallbackChoicesMap[q.id] || []);
+
+        const sortedChoices = [...rawChoices].sort(
           (a: any, b: any) => (a.order_index || 0) - (b.order_index || 0)
         );
+
+        // If choice.is_correct is not defined, infer from student answer if they were correct
+        const ans = answersMap[q.id];
+        if (ans && ans.is_correct && ans.selected_choice_id) {
+          sortedChoices.forEach((c: any) => {
+            if (c.id === ans.selected_choice_id) {
+              c.is_correct = true;
+            }
+          });
+        }
 
         return {
           id: q.id,
